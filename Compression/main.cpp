@@ -994,6 +994,7 @@ public:
                                 // Main dictionary word
                                 word_code = reader.read_bits(main_max_bit_length);
                                 if (word_code < main_decode_dict.size()) {
+                                    cout << "word: " << main_decode_dict[word_code] << endl;
                                     wildcard_word = main_decode_dict[word_code];
                                 } else {
                                     cerr << "Invalid wildcard word code in main dictionary: " << word_code << endl;
@@ -1020,6 +1021,7 @@ public:
                                     uint32_t code = phrase.word_codes[i];
                                     if (code < main_decode_dict.size()) {
                                         outfile << main_decode_dict[code];
+                                        cout << "word: " << main_decode_dict[code] << endl;
                                     } else {
                                         cerr << "Invalid word code in phrase: " << code << endl;
                                         return false;
