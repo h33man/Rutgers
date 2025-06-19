@@ -17,14 +17,17 @@ using namespace std;
 // Define token types
 enum class TokenType {
     WORD,
-    PHRASE
+    PHRASE,
+    WILDCARD_PHRASE
 };
 
-// Structure to represent a token (word or phrase)
+// Structure to represent a token (word, phrase, or wildcard phrase)
 struct Token {
     TokenType type;
     string content;  // For words
     vector<string> phrase_words;  // For phrases
+    vector<string> wildcard_pattern;  // For wildcard phrases (with WILDCARD markers)
+    string wildcard_word;  // The actual wildcard word
     
     Token(const string& word) : type(TokenType::WORD), content(word) {}
     Token(const vector<string>& words) : type(TokenType::PHRASE), phrase_words(words) {
@@ -36,9 +39,56 @@ struct Token {
         }
         content = ss.str();
     }
+    Token(const vector<string>& pattern, const string& wildcard) 
+        : type(TokenType::WILDCARD_PHRASE), wildcard_pattern(pattern), wildcard_word(wildcard) {
+        // Create a string representation for debugging
+        stringstream ss;
+        for (size_t i = 0; i < pattern.size(); ++i) {
+            if (i > 0) ss << " ";
+            if (pattern[i] == "WILDCARD") {
+                ss << "*" << wildcard << "*";
+            } else {
+                ss << pattern[i];
+            }
+        }
+        content = ss.str();
+    }
     
     string to_string() const {
         return content;
+    }
+    
+    string get_pattern_string() const {
+        if (type != TokenType::WILDCARD_PHRASE) return content;
+        
+        stringstream ss;
+        for (size_t i = 0; i < wildcard_pattern.size(); ++i) {
+            if (i > 0) ss << " ";
+            ss << wildcard_pattern[i];
+        }
+        return ss.str();
+    }
+};
+
+// Wildcard phrase structure
+struct WildcardPhrase {
+    vector<string> pattern;  // Pattern with "WILDCARD" marker
+    uint32_t frequency;
+    unordered_map<string, uint32_t> wildcard_words;  // Words that fill the wildcard
+    
+    WildcardPhrase(const vector<string>& pat) : pattern(pat), frequency(0) {}
+    
+    string to_string() const {
+        stringstream ss;
+        for (size_t i = 0; i < pattern.size(); ++i) {
+            if (i > 0) ss << " ";
+            if (pattern[i] == "WILDCARD") {
+                ss << "**";
+            } else {
+                ss << pattern[i];
+            }
+        }
+        return ss.str();
     }
 };
 
@@ -82,17 +132,18 @@ public:
     }
 };
 
-// Phrase finder
+// Enhanced phrase finder with wildcard support
 class PhraseFinder {
 private:
     shared_ptr<PhraseNode> root;
     uint32_t min_phrase_freq;
     uint32_t min_phrase_len;
     uint32_t max_phrase_len;
+    uint32_t min_wildcard_freq;
     
 public:
-    PhraseFinder(uint32_t min_freq = 2, uint32_t min_len = 2, uint32_t max_len = 7) 
-        : min_phrase_freq(min_freq), min_phrase_len(min_len), max_phrase_len(max_len) {
+    PhraseFinder(uint32_t min_freq = 2, uint32_t min_len = 2, uint32_t max_len = 7, uint32_t min_wildcard = 3) 
+        : min_phrase_freq(min_freq), min_phrase_len(min_len), max_phrase_len(max_len), min_wildcard_freq(min_wildcard) {
         root = make_shared<PhraseNode>();
     }
     
@@ -134,6 +185,82 @@ public:
                  });
         
         return frequent_phrases;
+    }
+    
+    // New method to find wildcard phrases
+    vector<WildcardPhrase> find_wildcard_phrases(const vector<string>& tokens,
+                                                const unordered_map<string, uint32_t>& word_to_code) {
+        unordered_map<string, WildcardPhrase> wildcard_patterns;
+        
+        // Generate wildcard patterns for different lengths
+        for (size_t len = min_phrase_len + 1; len <= max_phrase_len && len <= tokens.size(); ++len) {
+            // Try placing wildcard at different positions
+            for (size_t wildcard_pos = 1; wildcard_pos < len - 1; ++wildcard_pos) {
+                
+                // Extract patterns with wildcard at this position
+                for (size_t i = 0; i <= tokens.size() - len; ++i) {
+                    vector<string> pattern;
+                    string wildcard_word = tokens[i + wildcard_pos];
+                    
+                    // Skip if wildcard word is not in main dictionary
+                    if (word_to_code.find(wildcard_word) == word_to_code.end()) {
+                        continue;
+                    }
+                    
+                    bool valid_pattern = true;
+                    for (size_t j = 0; j < len; ++j) {
+                        if (j == wildcard_pos) {
+                            pattern.push_back("WILDCARD");
+                        } else {
+                            const string& word = tokens[i + j];
+                            if (word_to_code.find(word) == word_to_code.end()) {
+                                valid_pattern = false;
+                                break;
+                            }
+                            pattern.push_back(word);
+                        }
+                    }
+                    
+                    if (valid_pattern) {
+                        string pattern_key;
+                        for (size_t k = 0; k < pattern.size(); ++k) {
+                            if (k > 0) pattern_key += " ";
+                            pattern_key += pattern[k];
+                        }
+                        
+                        if (wildcard_patterns.find(pattern_key) == wildcard_patterns.end()) {
+                            wildcard_patterns.emplace(pattern_key, WildcardPhrase(pattern));
+                            //wildcard_patterns[pattern_key] = WildcardPhrase(pattern);
+                        }
+                        
+                        auto it = wildcard_patterns.find(pattern_key);
+                        if (it == wildcard_patterns.end()) {
+                            it = wildcard_patterns.emplace(pattern_key, WildcardPhrase(pattern)).first;
+                        }
+                        it->second.frequency++;
+                        it->second.wildcard_words[wildcard_word]++;
+                        //wildcard_patterns[pattern_key].frequency++;
+                        //wildcard_patterns[pattern_key].wildcard_words[wildcard_word]++;
+                    }
+                }
+            }
+        }
+        
+        // Filter frequent wildcard patterns
+        vector<WildcardPhrase> frequent_wildcards;
+        for (const auto& pair : wildcard_patterns) {
+            if (pair.second.frequency >= min_wildcard_freq) {
+                frequent_wildcards.push_back(pair.second);
+            }
+        }
+        
+        // Sort by frequency
+        sort(frequent_wildcards.begin(), frequent_wildcards.end(),
+             [](const WildcardPhrase& a, const WildcardPhrase& b) {
+                 return a.frequency > b.frequency;
+             });
+        
+        return frequent_wildcards;
     }
     
 private:
@@ -269,8 +396,10 @@ private:
     // Main dictionary for words and phrases
     unordered_map<string, uint32_t> main_encode_dict_words;
     unordered_map<string, uint32_t> main_encode_dict_phrases;
+    unordered_map<string, uint32_t> main_encode_dict_wildcards;  // New: wildcard patterns
     vector<string> main_decode_dict_words;
     vector<vector<string>> main_decode_dict_phrases;
+    vector<vector<string>> main_decode_dict_wildcards;  // New: wildcard patterns
     uint8_t main_max_bit_length = 0;
     
     // Local dictionary (for rare words)
@@ -281,11 +410,13 @@ private:
     // Frequency tracking
     unordered_map<string, uint32_t> word_frequencies;
     vector<PhraseFreq> phrase_frequencies;
+    vector<WildcardPhrase> wildcard_frequencies;  // New: wildcard phrase frequencies
     
     // Settings for phrase detection
     uint32_t min_phrase_freq = 2;  // Minimum frequency for phrases
     uint32_t min_phrase_len = 2;   // Minimum words in a phrase
     uint32_t max_phrase_len = 7;   // Maximum words in a phrase
+    uint32_t min_wildcard_freq = 3; // Minimum frequency for wildcard phrases
     
     // Preprocessing and tokenization
     vector<string> tokenize(const string& text) {
@@ -348,19 +479,22 @@ private:
         main_encode_dict_words.clear();
         main_decode_dict_phrases.clear();
         main_encode_dict_phrases.clear();
+        main_decode_dict_wildcards.clear();
+        main_encode_dict_wildcards.clear();
         
-        // First line contains the number of words and phrases
+        // First line contains the number of words, phrases, and wildcards
         if (!getline(infile, line)) {
             cerr << "Error reading dictionary file header" << endl;
             return false;
         }
         
         istringstream iss(line);
-        size_t word_count, phrase_count;
+        size_t word_count, phrase_count, wildcard_count = 0;
         if (!(iss >> word_count >> phrase_count)) {
             cerr << "Error parsing dictionary counts" << endl;
             return false;
         }
+        iss >> wildcard_count;  // Optional wildcard count
         
         // Read words
         for (size_t i = 0; i < word_count && getline(infile, line); ++i) {
@@ -389,9 +523,29 @@ private:
             }
         }
         
-        // Calculate bits needed for main dictionary (words + phrases)
+        // Read wildcard patterns
+        for (size_t i = 0; i < wildcard_count && getline(infile, line); ++i) {
+            if (!line.empty()) {
+                istringstream wildcard_iss(line);
+                string word;
+                vector<string> wildcard_pattern;
+                
+                while (wildcard_iss >> word) {
+                    wildcard_pattern.push_back(word);
+                }
+                
+                if (!wildcard_pattern.empty()) {
+                    main_decode_dict_wildcards.push_back(wildcard_pattern);
+                    main_encode_dict_wildcards[line] = i;
+                }
+            }
+        }
+        
+        // Calculate bits needed for main dictionary (words + phrases + wildcards)
         main_max_bit_length = 0;
-        size_t total_entries = main_decode_dict_words.size() + main_decode_dict_phrases.size();
+        size_t total_entries = main_decode_dict_words.size() + 
+                              main_decode_dict_phrases.size() + 
+                              main_decode_dict_wildcards.size();
         while ((1ULL << main_max_bit_length) < total_entries) {
             main_max_bit_length++;
         }
@@ -408,7 +562,9 @@ private:
         }
         
         // Write header with counts
-        outfile << main_decode_dict_words.size() << " " << main_decode_dict_phrases.size() << endl;
+        outfile << main_decode_dict_words.size() << " " 
+                << main_decode_dict_phrases.size() << " "
+                << main_decode_dict_wildcards.size() << endl;
         
         // Write words
         for (const auto& word : main_decode_dict_words) {
@@ -420,6 +576,15 @@ private:
             for (size_t i = 0; i < phrase.size(); ++i) {
                 if (i > 0) outfile << " ";
                 outfile << phrase[i];
+            }
+            outfile << endl;
+        }
+        
+        // Write wildcard patterns
+        for (const auto& wildcard : main_decode_dict_wildcards) {
+            for (size_t i = 0; i < wildcard.size(); ++i) {
+                if (i > 0) outfile << " ";
+                outfile << wildcard[i];
             }
             outfile << endl;
         }
@@ -450,7 +615,7 @@ private:
     
     // Detect common phrases in the text
     void detect_phrases(const vector<string>& tokens) {
-        PhraseFinder finder(min_phrase_freq, min_phrase_len, max_phrase_len);
+        PhraseFinder finder(min_phrase_freq, min_phrase_len, max_phrase_len, min_wildcard_freq);
         finder.find_phrases(tokens, main_encode_dict_words);
         
         auto frequent_phrases = finder.extract_frequent_phrases();
@@ -466,13 +631,18 @@ private:
                      return a.frequency > b.frequency;
                  });
         
+        // Find wildcard phrases
+        wildcard_frequencies = finder.find_wildcard_phrases(tokens, main_encode_dict_words);
+        
         // Print phrase statistics
         cout << "Found " << phrase_frequencies.size() << " common phrases:" << endl;
-        for (size_t i = 0; i < min(phrase_frequencies.size(), size_t(20)); ++i) {
+        for (size_t i = 0; i < min(phrase_frequencies.size(), size_t(10)); ++i) {
             cout << phrase_frequencies[i].to_string() << " (Frequency: " << phrase_frequencies[i].frequency << ")" << endl;
         }
-        if (phrase_frequencies.size() > 20) {
-            cout << "... and " << (phrase_frequencies.size() - 20) << " more phrases." << endl;
+        
+        cout << "Found " << wildcard_frequencies.size() << " wildcard phrases:" << endl;
+        for (size_t i = 0; i < min(wildcard_frequencies.size(), size_t(10)); ++i) {
+            cout << wildcard_frequencies[i].to_string() << " (Frequency: " << wildcard_frequencies[i].frequency << ")" << endl;
         }
     }
     
@@ -484,19 +654,52 @@ private:
         while (i < word_tokens.size()) {
             bool phrase_found = false;
             
-            // Try to match phrases starting from longest to shortest
-            for (size_t len = min(max_phrase_len, (uint32_t)(word_tokens.size() - i)); len >= min_phrase_len && !phrase_found; --len) {
-                if (i + len <= word_tokens.size()) {
-                    vector<string> potential_phrase(word_tokens.begin() + i, word_tokens.begin() + i + len);
-                    string phrase_str = potential_phrase[0];
-                    for (size_t j = 1; j < potential_phrase.size(); ++j) {
-                        phrase_str += " " + potential_phrase[j];
+            // Try to match wildcard phrases first (they tend to be longer and more specific)
+            for (const auto& wildcard : wildcard_frequencies) {
+                if (i + wildcard.pattern.size() <= word_tokens.size()) {
+                    bool matches = true;
+                    string wildcard_word;
+                    
+                    for (size_t j = 0; j < wildcard.pattern.size(); ++j) {
+                        if (wildcard.pattern[j] == "WILDCARD") {
+                            wildcard_word = word_tokens[i + j];
+                            // Check if this wildcard word was seen in training
+                            if (wildcard.wildcard_words.find(wildcard_word) == wildcard.wildcard_words.end()) {
+                                matches = false;
+                                break;
+                            }
+                        } else {
+                            if (word_tokens[i + j] != wildcard.pattern[j]) {
+                                matches = false;
+                                break;
+                            }
+                        }
                     }
                     
-                    if (main_encode_dict_phrases.find(phrase_str) != main_encode_dict_phrases.end()) {
-                        result.push_back(Token(potential_phrase));
-                        i += len;
+                    if (matches) {
+                        result.push_back(Token(wildcard.pattern, wildcard_word));
+                        i += wildcard.pattern.size();
                         phrase_found = true;
+                        break;
+                    }
+                }
+            }
+            
+            // If no wildcard phrase found, try regular phrases
+            if (!phrase_found) {
+                for (size_t len = min(max_phrase_len, (uint32_t)(word_tokens.size() - i)); len >= min_phrase_len && !phrase_found; --len) {
+                    if (i + len <= word_tokens.size()) {
+                        vector<string> potential_phrase(word_tokens.begin() + i, word_tokens.begin() + i + len);
+                        string phrase_str = potential_phrase[0];
+                        for (size_t j = 1; j < potential_phrase.size(); ++j) {
+                            phrase_str += " " + potential_phrase[j];
+                        }
+                        
+                        if (main_encode_dict_phrases.find(phrase_str) != main_encode_dict_phrases.end()) {
+                            result.push_back(Token(potential_phrase));
+                            i += len;
+                            phrase_found = true;
+                        }
                     }
                 }
             }
@@ -574,7 +777,7 @@ public:
             main_encode_dict_words[main_decode_dict_words[i]] = i;
         }
         
-        // Step 4: Detect common phrases
+        // Step 4: Detect common phrases and wildcard phrases
         detect_phrases(tokens);
         
         // Build phrase dictionary
@@ -587,33 +790,50 @@ public:
             main_encode_dict_phrases[phrase_str] = main_decode_dict_phrases.size() - 1;
         }
         
-        // Calculate bits needed for main dictionary (words + phrases)
+        // Build wildcard dictionary
+        main_decode_dict_wildcards.clear();
+        main_encode_dict_wildcards.clear();
+        
+        for (const auto& wf : wildcard_frequencies) {
+            main_decode_dict_wildcards.push_back(wf.pattern);
+            string pattern_str = "";
+            for (size_t i = 0; i < wf.pattern.size(); ++i) {
+                if (i > 0) pattern_str += " ";
+                pattern_str += wf.pattern[i];
+            }
+            main_encode_dict_wildcards[pattern_str] = main_decode_dict_wildcards.size() - 1;
+        }
+        
+        // Step 5: Calculate bits needed for main dictionary
+        size_t total_main_entries = main_decode_dict_words.size() + 
+                                   main_decode_dict_phrases.size() + 
+                                   main_decode_dict_wildcards.size();
         main_max_bit_length = 0;
-        size_t total_entries = main_decode_dict_words.size() + main_decode_dict_phrases.size();
-        while ((1ULL << main_max_bit_length) < total_entries) {
+        while ((1ULL << main_max_bit_length) < total_main_entries) {
             main_max_bit_length++;
         }
         
-        // Step 5: Write main dictionary to eng.dict
-        if (!write_main_dictionary("eng.dict")) {
-            return false;
-        }
-        
-        // Step 6: Identify words not in main dictionary
-        vector<string> rare_words;
-        
+        // Step 6: Identify rare words not in main dictionary
+        unordered_set<string> rare_words_set;
         for (const auto& token : tokens) {
             if (main_encode_dict_words.find(token) == main_encode_dict_words.end()) {
-                if (find(rare_words.begin(), rare_words.end(), token) == rare_words.end()) {
-                    rare_words.push_back(token);
-                }
+                rare_words_set.insert(token);
             }
         }
         
+        vector<string> rare_words(rare_words_set.begin(), rare_words_set.end());
+        sort(rare_words.begin(), rare_words.end());
+        
         // Step 7: Build local dictionary for rare words
         build_local_dictionary(rare_words);
+
+        // Step 8: Write main dictionary to file
+        if (!write_main_dictionary("eng.dict")) {
+            cerr << "Failed to write main dictionary file" << endl;
+            return false;
+        }
         
-        // Step 8: Tokenize the text with phrases
+        // Step 9: Tokenize input with phrases and wildcards
         auto phrase_tokens = tokenize_with_phrases(tokens);
         
         // Print dictionary statistics
@@ -621,8 +841,8 @@ public:
         cout << "Main dictionary:" << endl;
         cout << "  Words: " << main_decode_dict_words.size() << endl;
         cout << "  Phrases: " << main_decode_dict_phrases.size() << endl;
-        //cout << "  Wildcard patterns: " << main_decode_dict_wildcards.size() << endl;
-        cout << "  Total main entries: " << (main_decode_dict_words.size() + main_decode_dict_phrases.size()) << endl;
+        cout << "  Wildcard patterns: " << main_decode_dict_wildcards.size() << endl;
+        cout << "  Total main entries: " << (main_decode_dict_words.size() + main_decode_dict_phrases.size() + main_decode_dict_wildcards.size()) << endl;
         cout << "  Main dictionary bits per code: " << (int)main_max_bit_length << endl;
 
         cout << "Local dictionary:" << endl;
@@ -635,105 +855,141 @@ public:
             switch (token.type) {
                 case TokenType::WORD: word_count++; break;
                 case TokenType::PHRASE: phrase_count++; break;
-                //case TokenType::WILDCARD_PHRASE: wildcard_count++; break;
+                case TokenType::WILDCARD_PHRASE: wildcard_count++; break;
             }
         }
 
         cout << "\nToken usage:" << endl;
         cout << "  word tokens: " << word_count << endl;
         cout << "  phrase tokens: " << phrase_count << endl;
-        //cout << "  wildcard tokens: " << wildcard_count << " (each uses 2 codes)" << endl;
+        cout << "  wildcard tokens: " << wildcard_count << " (each uses 2 codes)" << endl;
         cout << "  total tokens: " << phrase_tokens.size() << endl;
-        cout << "  effective codes written: " << (word_count + phrase_count) << endl;
+        cout << "  effective codes written: " << (word_count + phrase_count + wildcard_count * 2) << endl;
         cout << "=============================\n" << endl;
-        // Step 9: Compress the text
+
+        // Step 10: Encode the text
         BitWriter writer;
         
-        // Write local dictionary
-        writer.write_bits(local_decode_dict.size(), 32);
+        // Write header information
+        writer.write_bits(main_max_bit_length, 8);
         writer.write_bits(local_max_bit_length, 8);
+        writer.write_bits(local_decode_dict.size(), 32);
         
-        // Write local dictionary words
+        // Write local dictionary
         for (const auto& word : local_decode_dict) {
-            // Write word length
             writer.write_bits(word.length(), 8);
-            
-            // Write word characters
             for (char c : word) {
                 writer.write_bits(static_cast<uint8_t>(c), 8);
             }
         }
         
-        // Write total token count
+        // Write number of tokens
         writer.write_bits(phrase_tokens.size(), 32);
         
-        // Compress tokens
+        // Encode tokens
         for (const auto& token : phrase_tokens) {
-            bool is_phrase = (token.type == TokenType::PHRASE);
-            bool is_main_dict = true;
-            uint32_t code = 0;
-            
-            // Check token type
-            if (is_phrase) {
-                // For phrases, we look up in the phrase dictionary
-                string phrase_str = token.to_string();
-                auto phrase_it = main_encode_dict_phrases.find(phrase_str);
-                if (phrase_it != main_encode_dict_phrases.end()) {
-                    // Offset by the size of the word dictionary
-                    code = main_decode_dict_words.size() + phrase_it->second;
-                } else {
-                    cerr << "Unexpected phrase: " << phrase_str << endl;
-                    return false;
-                }
-            } else {
-                // For words, first check main dictionary
-                auto main_it = main_encode_dict_words.find(token.content);
-                if (main_it != main_encode_dict_words.end()) {
-                    code = main_it->second;
-                } else {
-                    // If not in main dict, use local dict
-                    auto local_it = local_encode_dict.find(token.content);
-                    if (local_it != local_encode_dict.end()) {
-                        is_main_dict = false;
-                        code = local_it->second;
+            switch (token.type) {
+                case TokenType::WORD: {
+                    auto it = main_encode_dict_words.find(token.content);
+                    if (it != main_encode_dict_words.end()) {
+                        // Main dictionary word
+                        writer.write_bits(0, 2);  // Type: main word
+                        writer.write_bits(it->second, main_max_bit_length);
                     } else {
-                        // Unexpected: word should be in either dictionary
-                        cerr << "Unexpected word: " << token.content << endl;
+                        // Local dictionary word
+                        auto local_it = local_encode_dict.find(token.content);
+                        if (local_it != local_encode_dict.end()) {
+                            writer.write_bits(1, 2);  // Type: local word
+                            writer.write_bits(local_it->second, local_max_bit_length);
+                        } else {
+                            cerr << "Error: Word not found in any dictionary: " << token.content << endl;
+                            return false;
+                        }
+                    }
+                    break;
+                }
+                case TokenType::PHRASE: {
+                    string phrase_str = token.to_string();
+                    auto it = main_encode_dict_phrases.find(phrase_str);
+                    if (it != main_encode_dict_phrases.end()) {
+                        writer.write_bits(2, 2);  // Type: phrase
+                        uint32_t phrase_code = main_decode_dict_words.size() + it->second;
+                        writer.write_bits(phrase_code, main_max_bit_length);
+                    } else {
+                        cerr << "Error: Phrase not found in dictionary: " << phrase_str << endl;
                         return false;
                     }
+                    break;
                 }
-            }
-            
-            // Write dictionary type flag (2 bits: 00=local word, 01=main word, 10=main phrase)
-            if (!is_main_dict) {
-                writer.write_bits(0, 2);  // Local dictionary word
-                writer.write_bits(code, local_max_bit_length);
-            } else if (!is_phrase) {
-                writer.write_bits(1, 2);  // Main dictionary word
-                writer.write_bits(code, main_max_bit_length);
-            } else {
-                writer.write_bits(2, 2);  // Main dictionary phrase
-                writer.write_bits(code, main_max_bit_length);
+                case TokenType::WILDCARD_PHRASE: {
+                    string pattern_str = token.get_pattern_string();
+                    auto it = main_encode_dict_wildcards.find(pattern_str);
+                    if (it != main_encode_dict_wildcards.end()) {
+                        writer.write_bits(3, 2);  // Type: wildcard phrase
+                        uint32_t wildcard_code = main_decode_dict_words.size() + 
+                                               main_decode_dict_phrases.size() + it->second;
+                        writer.write_bits(wildcard_code, main_max_bit_length);
+                        
+                        // Encode the wildcard word
+                        auto word_it = main_encode_dict_words.find(token.wildcard_word);
+                        if (word_it != main_encode_dict_words.end()) {
+                            writer.write_bits(0, 2);  // Type: main word
+                            writer.write_bits(word_it->second, main_max_bit_length);
+                        } else {
+                            auto local_it = local_encode_dict.find(token.wildcard_word);
+                            if (local_it != local_encode_dict.end()) {
+                                writer.write_bits(1, 2);  // Type: local word
+                                writer.write_bits(local_it->second, local_max_bit_length);
+                            } else {
+                                cerr << "Error: Wildcard word not found: " << token.wildcard_word << endl;
+                                return false;
+                            }
+                        }
+                    } else {
+                        cerr << "Error: Wildcard pattern not found: " << pattern_str << endl;
+                        return false;
+                    }
+                    break;
+                }
             }
         }
         
-        // Write to file
-        return writer.write_to_file(output_file);
-    }
-
-// Decompression method
-    bool decompress(const string& input_file, 
-                    const string& dict_file,
-                    const string& output_file) {
-        // Load main dictionary
-        if (!load_main_dictionary(dict_file)) {
+        // Write to output file
+        if (!writer.write_to_file(output_file)) {
+            cerr << "Error writing to output file: " << output_file << endl;
             return false;
         }
         
-        // Read compressed file
+        // Print compression statistics
+        ifstream original(input_file, ios::binary | ios::ate);
+        size_t original_size = original.tellg();
+        original.close();
+        
+        ifstream compressed(output_file, ios::binary | ios::ate);
+        size_t compressed_size = compressed.tellg();
+        compressed.close();
+        
+        cout << "Compression completed successfully!" << endl;
+        cout << "Original size: " << original_size << " bytes" << endl;
+        cout << "Compressed size: " << compressed_size << " bytes" << endl;
+        cout << "Compression ratio: " << (double)compressed_size / original_size << endl;
+        cout << "Space saved: " << (1.0 - (double)compressed_size / original_size) * 100 << "%" << endl;
+        
+        return true;
+    }
+    
+    // Decompression method
+    bool decompress(const string& input_file, const string& output_file) {
+        // Step 1: Load main dictionary
+        if (!load_main_dictionary("eng.dict")) {
+            cerr << "Failed to load main dictionary" << endl;
+            return false;
+        }
+        
+        // Step 2: Read compressed file
         ifstream infile(input_file, ios::binary);
         if (!infile) {
-            cerr << "Error opening compressed file: " << input_file << endl;
+            cerr << "Error opening input file: " << input_file << endl;
             return false;
         }
         
@@ -742,126 +998,209 @@ public:
         
         BitReader reader(buffer);
         
-        // Read local dictionary
+        // Step 3: Read header information
+        main_max_bit_length = reader.read_bits(8);
+        local_max_bit_length = reader.read_bits(8);
         uint32_t local_dict_size = reader.read_bits(32);
-        uint8_t local_max_bits = reader.read_bits(8);
         
+        // Step 4: Read local dictionary
         local_decode_dict.clear();
+        local_encode_dict.clear();
         
-        // Read local dictionary words
         for (uint32_t i = 0; i < local_dict_size; ++i) {
-            // Read word length
             uint8_t word_length = reader.read_bits(8);
-            
-            // Read word characters
             string word;
+            
             for (uint8_t j = 0; j < word_length; ++j) {
-                char c = static_cast<char>(reader.read_bits(8));
-                word += c;
+                word += static_cast<char>(reader.read_bits(8));
             }
             
             local_decode_dict.push_back(word);
+            local_encode_dict[word] = i;
         }
         
-        // Read total token count
-        uint32_t token_count = reader.read_bits(32);
+        // Step 5: Read number of tokens
+        uint32_t num_tokens = reader.read_bits(32);
         
-        // Decompress tokens
+        // Step 6: Decode tokens
         ofstream outfile(output_file);
         if (!outfile) {
             cerr << "Error opening output file: " << output_file << endl;
             return false;
         }
         
-        for (uint32_t i = 0; i < token_count; ++i) {
-            // Read token type (2 bits)
-            uint32_t token_type = reader.read_bits(2);
+        bool first_token = true;
+        for (uint32_t i = 0; i < num_tokens; ++i) {
+            uint8_t token_type = reader.read_bits(2);
             
-            // Read token code
-            uint32_t code;
+            if (!first_token) {
+                // Add space before token (except for punctuation)
+                outfile << " ";
+            }
+            first_token = false;
             
             switch (token_type) {
-                case 0: // Local dictionary word
-                    code = reader.read_bits(local_max_bits);
-                    if (code < local_decode_dict.size()) {
-                        outfile << local_decode_dict[code];
+                case 0: { // Main dictionary word
+                    uint32_t word_code = reader.read_bits(main_max_bit_length);
+                    if (word_code < main_decode_dict_words.size()) {
+                        string word = main_decode_dict_words[word_code];
+                        
+                        // Don't add space before punctuation
+                        if (word.length() == 1 && !isalnum(word[0])) {
+                            outfile.seekp(-1, ios::cur);  // Remove the space we just added
+                        }
+                        
+                        outfile << word;
                     } else {
-                        cerr << "Invalid local dictionary code: " << code << endl;
+                        cerr << "Error: Invalid main word code: " << word_code << endl;
                         return false;
                     }
                     break;
-                    
-                case 1: // Main dictionary word
-                    code = reader.read_bits(main_max_bit_length);
-                    if (code < main_decode_dict_words.size()) {
-                        outfile << main_decode_dict_words[code];
+                }
+                case 1: { // Local dictionary word
+                    uint32_t word_code = reader.read_bits(local_max_bit_length);
+                    if (word_code < local_decode_dict.size()) {
+                        outfile << local_decode_dict[word_code];
                     } else {
-                        cerr << "Invalid main dictionary word code: " << code << endl;
+                        cerr << "Error: Invalid local word code: " << word_code << endl;
                         return false;
                     }
                     break;
+                }
+                case 2: { // Phrase
+                    uint32_t phrase_code = reader.read_bits(main_max_bit_length);
+                    uint32_t phrase_index = phrase_code - main_decode_dict_words.size();
                     
-                case 2: // Main dictionary phrase
-                    code = reader.read_bits(main_max_bit_length);
-                    if (code >= main_decode_dict_words.size()) {
-                        // Adjust code to phrase dictionary index
-                        uint32_t phrase_idx = code - main_decode_dict_words.size();
-                        if (phrase_idx < main_decode_dict_phrases.size()) {
-                            const auto& phrase = main_decode_dict_phrases[phrase_idx];
-                            for (size_t j = 0; j < phrase.size(); ++j) {
-                                if (j > 0) outfile << " ";
-                                outfile << phrase[j];
-                            }
-                        } else {
-                            cerr << "Invalid main dictionary phrase code: " << code << endl;
-                            return false;
+                    if (phrase_index < main_decode_dict_phrases.size()) {
+                        const auto& phrase = main_decode_dict_phrases[phrase_index];
+                        for (size_t j = 0; j < phrase.size(); ++j) {
+                            if (j > 0) outfile << " ";
+                            outfile << phrase[j];
                         }
                     } else {
-                        cerr << "Invalid phrase code (in word range): " << code << endl;
+                        cerr << "Error: Invalid phrase code: " << phrase_code << endl;
                         return false;
                     }
                     break;
+                }
+                case 3: { // Wildcard phrase
+                    uint32_t wildcard_code = reader.read_bits(main_max_bit_length);
+                    uint32_t wildcard_index = wildcard_code - main_decode_dict_words.size() - 
+                                             main_decode_dict_phrases.size();
                     
+                    if (wildcard_index < main_decode_dict_wildcards.size()) {
+                        const auto& pattern = main_decode_dict_wildcards[wildcard_index];
+                        
+                        // Read the wildcard word
+                        uint8_t wildcard_word_type = reader.read_bits(2);
+                        string wildcard_word;
+                        
+                        if (wildcard_word_type == 0) { // Main dictionary word
+                            uint32_t word_code = reader.read_bits(main_max_bit_length);
+                            if (word_code < main_decode_dict_words.size()) {
+                                wildcard_word = main_decode_dict_words[word_code];
+                            } else {
+                                cerr << "Error: Invalid wildcard main word code: " << word_code << endl;
+                                return false;
+                            }
+                        } else if (wildcard_word_type == 1) { // Local dictionary word
+                            uint32_t word_code = reader.read_bits(local_max_bit_length);
+                            if (word_code < local_decode_dict.size()) {
+                                wildcard_word = local_decode_dict[word_code];
+                            } else {
+                                cerr << "Error: Invalid wildcard local word code: " << word_code << endl;
+                                return false;
+                            }
+                        } else {
+                            cerr << "Error: Invalid wildcard word type: " << wildcard_word_type << endl;
+                            return false;
+                        }
+                        
+                        // Output the pattern with wildcard substituted
+                        for (size_t j = 0; j < pattern.size(); ++j) {
+                            if (j > 0) outfile << " ";
+                            if (pattern[j] == "WILDCARD") {
+                                outfile << wildcard_word;
+                            } else {
+                                outfile << pattern[j];
+                            }
+                        }
+                    } else {
+                        cerr << "Error: Invalid wildcard pattern code: " << wildcard_code << endl;
+                        return false;
+                    }
+                    break;
+                }
                 default:
-                    cerr << "Invalid token type: " << token_type << endl;
+                    cerr << "Error: Unknown token type: " << (int)token_type << endl;
                     return false;
             }
         }
         
-        return outfile.good();
+        outfile.close();
+        
+        cout << "Decompression completed successfully!" << endl;
+        return true;
     }
 };
 
 int main(int argc, char* argv[]) {
-    if (argc < 5) {
-        cout << "Usage: " << argv[0] << " <mode> <dict_file> <input_file> <output_file>" << endl;
-        cout << "Modes: c or d" << endl;
+    if (argc < 4) {
+        cout << "Usage: " << argv[0] << " <mode> <dict_file> <input_file> [output_file]" << endl;
+        cout << "Modes:" << endl;
+        cout << "  -c: Compress text file" << endl;
+        cout << "  -d: Decompress compressed file" << endl;
+        cout << "Examples:" << endl;
+        cout << "  " << argv[0] << " -c english_words.txt input.txt compressed.bin" << endl;
+        cout << "  " << argv[0] << " -d eng.dict compressed.bin output.txt" << endl;
         return 1;
     }
     
     string mode = argv[1];
     string dict_file = argv[2];
     string input_file = argv[3];
-    string output_file = argv[4];
+    string output_file;
+    
+    if (argc >= 5) {
+        output_file = argv[4];
+    }
     
     TwoTierTextCompressor compressor;
     
-    if (mode == "c") {
+    if (mode == "-c") {
+        // Compression mode
+        if (output_file.empty()) {
+            output_file = input_file + ".compressed";
+        }
+        
+        cout << "Compressing file: " << input_file << endl;
+        cout << "Dictionary file: " << dict_file << endl;
+        cout << "Output file: " << output_file << endl;
+        
         if (compressor.compress(dict_file, input_file, output_file)) {
-            cout << "Compression complete." << endl;
+            cout << "Compression successful!" << endl;
         } else {
-            cerr << "Compression failed." << endl;
+            cout << "Compression failed!" << endl;
             return 1;
         }
-    } else if (mode == "d") {
-        if (compressor.decompress(input_file, dict_file, output_file)) {
-            cout << "Decompression complete." << endl;
+    } else if (mode == "-d") {
+        // Decompression mode
+        if (output_file.empty()) {
+            output_file = input_file + ".decompressed";
+        }
+        
+        cout << "Decompressing file: " << input_file << endl;
+        cout << "Output file: " << output_file << endl;
+        
+        if (compressor.decompress(input_file, output_file)) {
+            cout << "Decompression successful!" << endl;
         } else {
-            cerr << "Decompression failed." << endl;
+            cout << "Decompression failed!" << endl;
             return 1;
         }
     } else {
-        cerr << "Unknown mode: " << mode << endl;
+        cout << "Invalid mode: " << mode << endl;
+        cout << "Use -c for compression or -d for decompression" << endl;
         return 1;
     }
     
