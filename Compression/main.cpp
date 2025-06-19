@@ -301,22 +301,22 @@ private:
                                 word_codes.push_back(new_code);
                             }
                         } else {
-                            // For wildcards, add a placeholder code (will be replaced during tokenization)
+                            // For wildcards, add a placeholder code
                             word_codes.push_back(UINT32_MAX); // Special value to indicate wildcard
                         }
                     }
                     
-                    // Add the phrase pattern to trie
+                    // Add the phrase pattern to trie - but be careful with the structure
                     shared_ptr<PhraseNode> current = phrase_trie_root;
+                    size_t word_index = 0;
                     
                     for (size_t i = 0; i < phrase_words.size(); ++i) {
-                        const string& next_word = phrase_words[i];
-                        
-                        if (next_word == "*") {
-                            // Skip the wildcard in the trie traversal
+                        if (i == wildcard_pos) {
+                            // Skip adding the wildcard position to the trie
                             continue;
                         }
                         
+                        const string& next_word = phrase_words[i];
                         if (current->children.find(next_word) == current->children.end()) {
                             current->children[next_word] = make_shared<PhraseNode>();
                         }
@@ -462,6 +462,13 @@ private:
             for (size_t j = 0; j < 5 && i + j < raw_tokens.size(); ++j) {
                 const string& token = raw_tokens[i + j];
                 
+                // Handle potential wildcard in the phrase
+                if (current->has_wildcard && j == current->wildcard_pos) {
+                    // Skip checking this token, as it's a wildcard position
+                    wildcard_word = token;
+                    continue;
+                }
+                
                 if (current->children.find(token) != current->children.end()) {
                     current = current->children[token];
                     
@@ -469,7 +476,7 @@ private:
                         last_match = current;
                         match_length = j + 1;
                         
-                        // Check for wildcard
+                        // If this phrase has a wildcard, record its position and the actual word
                         if (current->has_wildcard && i + current->wildcard_pos < raw_tokens.size()) {
                             wildcard_pos = current->wildcard_pos;
                             wildcard_word = raw_tokens[i + wildcard_pos];
@@ -486,12 +493,17 @@ private:
                     // Add phrase token with separate wildcard token
                     processed_tokens.push_back(Token(PHRASE, "", last_match->phrase_id));
                     processed_tokens.push_back(Token(WILDCARD, wildcard_word, last_match->phrase_id));
+                    
+                    // Skip the entire phrase including the wildcard
+                    i += match_length;
+                    if (wildcard_pos >= match_length) {
+                        i++; // Skip the wildcard word if it's beyond the normal match length
+                    }
                 } else {
                     // Add regular phrase token
                     processed_tokens.push_back(Token(PHRASE, "", last_match->phrase_id));
+                    i += match_length;
                 }
-                
-                i += match_length;
             } else {
                 // No phrase match, add as regular word
                 processed_tokens.push_back(Token(WORD, raw_tokens[i]));
@@ -782,7 +794,6 @@ public:
         
         // Calculate bits needed for main dictionary
         main_max_bit_length = 0;
-
         while ((1ULL << main_max_bit_length) < main_decode_dict.size()) {
             main_max_bit_length++;
         }
@@ -802,7 +813,8 @@ public:
         // Step 9: Collect rare words (words not in the main dictionary)
         vector<string> rare_words;
         for (const auto& token : processed_tokens) {
-            if (token.type == WORD && main_encode_dict.find(token.word) == main_encode_dict.end()) {
+            if ((token.type == WORD || token.type == WILDCARD) && 
+                main_encode_dict.find(token.word) == main_encode_dict.end()) {
                 rare_words.push_back(token.word);
             }
         }
@@ -839,13 +851,13 @@ public:
                 auto it = main_encode_dict.find(token.word);
                 if (it != main_encode_dict.end()) {
                     // Word in main dictionary
-                    writer.write_bits(0, 1);  // Type bit: 0 = main dictionary word
+                    writer.write_bits(0, 2);  // Type bits: 00 = main dictionary word
                     writer.write_bits(it->second, main_max_bit_length);
                 } else {
                     // Word in local dictionary
                     auto local_it = local_encode_dict.find(token.word);
                     if (local_it != local_encode_dict.end()) {
-                        writer.write_bits(1, 1);  // Type bit: 1 = local dictionary word
+                        writer.write_bits(1, 2);  // Type bits: 01 = local dictionary word
                         writer.write_bits(local_it->second, local_max_bit_length);
                     } else {
                         cerr << "Error: Word not found in either dictionary: " << token.word << endl;
@@ -853,27 +865,60 @@ public:
                     }
                 }
             } else if (token.type == PHRASE) {
-                // Phrase reference
-                writer.write_bits(2, 2);  // Type bits: 10 = phrase reference
-                writer.write_bits(token.phrase_id, phrase_max_bit_length);
-            } else if (token.type == WILDCARD) {
-                // Wildcard word in phrase
-                writer.write_bits(3, 2);  // Type bits: 11 = wildcard word
+                const auto& phrase = phrase_decode_dict[token.phrase_id];
                 
-                // Check if wildcard word is in main dictionary
+                if (phrase.has_wildcard) {
+                    // Ensure we have a wildcard token next
+                    if (i + 1 >= processed_tokens.size() || processed_tokens[i + 1].type != WILDCARD) {
+                        cerr << "Error: Expected wildcard token after wildcard phrase at position " << i << endl;
+                        return false;
+                    }
+                    
+                    const auto& wildcard_token = processed_tokens[i + 1];
+                    
+                    // Encode wildcard phrase
+                    writer.write_bits(2, 2);  // Type bits: 10 = wildcard phrase
+                    writer.write_bits(token.phrase_id, phrase_max_bit_length);
+                    
+                    // Encode the wildcard word
+                    auto main_it = main_encode_dict.find(wildcard_token.word);
+                    if (main_it != main_encode_dict.end()) {
+                        writer.write_bits(0, 1);  // Dictionary type: 0 = main
+                        writer.write_bits(main_it->second, main_max_bit_length);
+                    } else {
+                        auto local_it = local_encode_dict.find(wildcard_token.word);
+                        if (local_it != local_encode_dict.end()) {
+                            writer.write_bits(1, 1);  // Dictionary type: 1 = local
+                            writer.write_bits(local_it->second, local_max_bit_length);
+                        } else {
+                            cerr << "Error: Wildcard word not found in either dictionary: " << wildcard_token.word << endl;
+                            return false;
+                        }
+                    }
+                    
+                    // Skip the wildcard token
+                    i++;
+                } else {
+                    // Regular phrase without wildcards
+                    writer.write_bits(3, 2);  // Type bits: 11 = regular phrase
+                    writer.write_bits(token.phrase_id, phrase_max_bit_length);
+                }
+            } else if (token.type == WILDCARD) {
+                // If we encounter a standalone wildcard token (not part of a phrase),
+                // handle it as a regular word
+                cerr << "Warning: Encountered standalone wildcard token, treating as regular word: " << token.word << endl;
+                
                 auto it = main_encode_dict.find(token.word);
                 if (it != main_encode_dict.end()) {
-                    // Word in main dictionary
-                    writer.write_bits(0, 1);  // Word type bit: 0 = main dictionary word
+                    writer.write_bits(0, 2);  // Type bits: 00 = main dictionary word
                     writer.write_bits(it->second, main_max_bit_length);
                 } else {
-                    // Word in local dictionary
                     auto local_it = local_encode_dict.find(token.word);
                     if (local_it != local_encode_dict.end()) {
-                        writer.write_bits(1, 1);  // Word type bit: 1 = local dictionary word
+                        writer.write_bits(1, 2);  // Type bits: 01 = local dictionary word
                         writer.write_bits(local_it->second, local_max_bit_length);
                     } else {
-                        cerr << "Error: Wildcard word not found in either dictionary: " << token.word << endl;
+                        cerr << "Error: Word not found in either dictionary: " << token.word << endl;
                         return false;
                     }
                 }
@@ -889,6 +934,7 @@ public:
         return true;
     }
 
+    // Decompression method
     bool decompress(const string& dict_file, 
                     const string& input_file, 
                     const string& output_file) {
@@ -896,6 +942,19 @@ public:
         if (!load_dictionaries(dict_file)) {
             cerr << "Failed to load dictionaries from file: " << dict_file << endl;
             return false;
+        }
+        
+        // Verify phrase dictionary consistency
+        for (size_t i = 0; i < phrase_decode_dict.size(); i++) {
+            const auto& phrase = phrase_decode_dict[i];
+            if (phrase.has_wildcard) {
+                if (phrase.wildcard_pos >= phrase.word_codes.size()) {
+                    cerr << "Warning: Phrase " << i << " has invalid wildcard position " 
+                         << phrase.wildcard_pos << " (phrase length: " << phrase.word_codes.size() << ")" << endl;
+                    // Fix the wildcard position to something sensible
+                    const_cast<PhraseInfo&>(phrase).wildcard_pos = 0;
+                }
+            }
         }
         
         // Step 2: Read compressed data
@@ -938,120 +997,148 @@ public:
             return false;
         }
         
+        // Track if we need to add a space before the next token
+        bool need_space = false;
+        
         while (reader.has_more()) {
-            // Read token type
-            uint8_t type_bits = reader.read_bits(1);
+            // Read token type (2 bits)
+            uint32_t token_type = reader.read_bits(2);
             
-            if (type_bits == 0) {
-                // Main dictionary word
+            // Add space between tokens if needed
+            if (need_space) {
+                outfile << " ";
+                need_space = false;
+            }
+            
+            // Process token based on its type
+            if (token_type == 0) {
+                // Main dictionary word (00)
                 uint32_t word_code = reader.read_bits(main_max_bit_length);
                 if (word_code < main_decode_dict.size()) {
                     outfile << main_decode_dict[word_code];
+                    need_space = true;
                 } else {
                     cerr << "Invalid word code in main dictionary: " << word_code << endl;
                     return false;
                 }
-            } else {
-                // Additional type bit needed
-                uint8_t additional_type_bit = reader.read_bits(1);
-                
-                if (additional_type_bit == 0) {
-                    // Local dictionary word
-                    uint32_t word_code = reader.read_bits(local_max_bit_length);
-                    if (word_code < local_decode_dict.size()) {
-                        outfile << local_decode_dict[word_code];
-                    } else {
-                        cerr << "Invalid word code in local dictionary: " << word_code << endl;
-                        return false;
+            } else if (token_type == 1) {
+                // Local dictionary word (01)
+                uint32_t word_code = reader.read_bits(local_max_bit_length);
+                if (word_code < local_decode_dict.size()) {
+                    outfile << local_decode_dict[word_code];
+                    need_space = true;
+                } else {
+                    cerr << "Invalid word code in local dictionary: " << word_code << endl;
+                    return false;
+                }
+            } else if (token_type == 2) {
+                // Wildcard phrase (10)
+                uint32_t phrase_id = reader.read_bits(phrase_max_bit_length);
+                if (phrase_id < phrase_decode_dict.size()) {
+                    const auto& phrase = phrase_decode_dict[phrase_id];
+                    
+                    // Verify this is indeed a wildcard phrase
+                    if (!phrase.has_wildcard) {
+                        cerr << "Warning: Compressed data indicates a wildcard phrase (ID: " << phrase_id 
+                             << "), but phrase dictionary says it's not. Treating as wildcard anyway." << endl;
+                        // Continue processing as if it were a wildcard phrase
                     }
-                } else if (additional_type_bit == 1) {
-                    // Phrase reference
-                    uint32_t phrase_id = reader.read_bits(phrase_max_bit_length);
-                    if (phrase_id < phrase_decode_dict.size()) {
-                        const auto& phrase = phrase_decode_dict[phrase_id];
-                        
-                        // Handle phrases differently based on whether they have a wildcard
-                        if (phrase.has_wildcard) {
-                            // For phrases with wildcards, we need the next token to be the wildcard word
-                            if (!reader.has_more()) {
-                                cerr << "Error: Expected wildcard word after wildcard phrase" << endl;
-                                return false;
-                            }
-                            
-                            // Read wildcard word type
-                            uint8_t wildcard_type = reader.read_bits(2);
-                            if (wildcard_type != 3) {
-                                cerr << "Error: Expected wildcard token after wildcard phrase" << endl;
-                                return false;
-                            }
-                            
-                            // Read wildcard word
-                            uint8_t word_dict_type = reader.read_bits(1);
-                            uint32_t word_code;
-                            string wildcard_word;
-                            
-                            if (word_dict_type == 0) {
-                                // Main dictionary word
-                                word_code = reader.read_bits(main_max_bit_length);
-                                if (word_code < main_decode_dict.size()) {
-                                    cout << "word: " << main_decode_dict[word_code] << endl;
-                                    wildcard_word = main_decode_dict[word_code];
-                                } else {
-                                    cerr << "Invalid wildcard word code in main dictionary: " << word_code << endl;
-                                    return false;
-                                }
-                            } else {
-                                // Local dictionary word
-                                word_code = reader.read_bits(local_max_bit_length);
-                                if (word_code < local_decode_dict.size()) {
-                                    wildcard_word = local_decode_dict[word_code];
-                                } else {
-                                    cerr << "Invalid wildcard word code in local dictionary: " << word_code << endl;
-                                    return false;
-                                }
-                            }
-                            
-                            // Output phrase with wildcard word inserted
-                            for (size_t i = 0; i < phrase.word_codes.size(); ++i) {
-                                if (i > 0) outfile << " ";
-                                
-                                if (i == phrase.wildcard_pos) {
-                                    outfile << wildcard_word;
-                                } else {
-                                    uint32_t code = phrase.word_codes[i];
-                                    if (code < main_decode_dict.size()) {
-                                        outfile << main_decode_dict[code];
-                                        cout << "word: " << main_decode_dict[code] << endl;
-                                    } else {
-                                        cerr << "Invalid word code in phrase: " << code << endl;
-                                        return false;
-                                    }
-                                }
-                            }
+                    
+                    // Read the wildcard word
+                    uint8_t dict_type = reader.read_bits(1);
+                    string wildcard_word;
+                    
+                    if (dict_type == 0) {
+                        // Main dictionary word
+                        uint32_t word_code = reader.read_bits(main_max_bit_length);
+                        if (word_code < main_decode_dict.size()) {
+                            wildcard_word = main_decode_dict[word_code];
                         } else {
-                            // Regular phrase
-                            for (size_t i = 0; i < phrase.word_codes.size(); ++i) {
-                                if (i > 0) outfile << " ";
-                                
-                                uint32_t code = phrase.word_codes[i];
-                                if (code < main_decode_dict.size()) {
-                                    outfile << main_decode_dict[code];
-                                } else {
-                                    cerr << "Invalid word code in phrase: " << code << endl;
-                                    return false;
-                                }
-                            }
+                            cerr << "Invalid wildcard word code in main dictionary: " << word_code << endl;
+                            return false;
                         }
                     } else {
-                        cerr << "Invalid phrase ID: " << phrase_id << endl;
-                        return false;
+                        // Local dictionary word
+                        uint32_t word_code = reader.read_bits(local_max_bit_length);
+                        if (word_code < local_decode_dict.size()) {
+                            wildcard_word = local_decode_dict[word_code];
+                        } else {
+                            cerr << "Invalid wildcard word code in local dictionary: " << word_code << endl;
+                            return false;
+                        }
                     }
+                    
+                    // Determine wildcard position (safely)
+                    size_t wildcard_pos = 0;
+                    if (phrase.has_wildcard && phrase.wildcard_pos < phrase.word_codes.size()) {
+                        wildcard_pos = phrase.wildcard_pos;
+                    }
+                    
+                    // Output the phrase with the wildcard word inserted
+                    bool first_word = true;
+                    for (size_t i = 0; i < phrase.word_codes.size(); ++i) {
+                        if (i == wildcard_pos) {
+                            // Insert the wildcard word
+                            if (!first_word) outfile << " ";
+                            outfile << wildcard_word;
+                            first_word = false;
+                        } else if (phrase.word_codes[i] != UINT32_MAX) { // Skip wildcard placeholders
+                            if (!first_word) outfile << " ";
+                            uint32_t code = phrase.word_codes[i];
+                            if (code < main_decode_dict.size()) {
+                                outfile << main_decode_dict[code];
+                                first_word = false;
+                            } else {
+                                cerr << "Invalid word code in phrase: " << code << endl;
+                                return false;
+                            }
+                        }
+                    }
+                    need_space = true;
+                } else {
+                    cerr << "Invalid phrase ID: " << phrase_id << endl;
+                    return false;
                 }
-            }
-            
-            // Add space after each token (except certain punctuation)
-            if (reader.has_more()) {
-                outfile << " ";
+            } else if (token_type == 3) {
+                // Regular phrase without wildcard (11)
+                uint32_t phrase_id = reader.read_bits(phrase_max_bit_length);
+                if (phrase_id < phrase_decode_dict.size()) {
+                    const auto& phrase = phrase_decode_dict[phrase_id];
+                    
+                    // Verify this is indeed a regular phrase
+                    if (phrase.has_wildcard) {
+                        cerr << "Warning: Compressed data indicates a regular phrase (ID: " << phrase_id 
+                             << "), but phrase dictionary says it's a wildcard phrase. Treating as regular anyway." << endl;
+                        // Continue processing as a regular phrase
+                    }
+                    
+                    // Output the regular phrase
+                    bool first_word = true;
+                    for (size_t i = 0; i < phrase.word_codes.size(); ++i) {
+                        // Skip wildcard positions when treating as regular phrase
+                        if (phrase.has_wildcard && i == phrase.wildcard_pos) {
+                            continue;
+                        }
+                        
+                        if (!first_word) outfile << " ";
+                        
+                        uint32_t code = phrase.word_codes[i];
+                        if (code < main_decode_dict.size() && code != UINT32_MAX) {
+                            outfile << main_decode_dict[code];
+                            first_word = false;
+                        } else if (code == UINT32_MAX) {
+                            // Skip wildcard placeholder
+                            continue;
+                        } else {
+                            cerr << "Invalid word code in phrase: " << code << endl;
+                            return false;
+                        }
+                    }
+                    need_space = true;
+                } else {
+                    cerr << "Invalid phrase ID: " << phrase_id << endl;
+                    return false;
+                }
             }
         }
         
