@@ -410,7 +410,7 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
 void print_hex(const unsigned char *data, int len) {
     if (len > 20) return;
     for (int i = 0; i < len; i++)
-        bpf_printk("%02x", data[i++]);
+        bpf_printk("%02x\n", data[i++]);
     bpf_printk("\n");
 }
 
@@ -464,20 +464,20 @@ static __always_inline int compute_keyed_hash(struct xdp_md *ctx, const BYTE *da
     // Initialize buffer with key using explicit assignments
     temp->buffer[0] = SECRET_KEY[0];
     temp->buffer[1] = SECRET_KEY[1];
-    temp->buffer[2] = SECRET_KEY[1];
-    temp->buffer[3] = SECRET_KEY[1];
-    temp->buffer[4] = SECRET_KEY[1];
-    temp->buffer[5] = SECRET_KEY[1];
-    temp->buffer[6] = SECRET_KEY[1];
-    temp->buffer[7] = SECRET_KEY[1];
-    temp->buffer[8] = SECRET_KEY[1];
-    temp->buffer[9] = SECRET_KEY[1];
-    temp->buffer[10] = SECRET_KEY[1];
-    temp->buffer[11] = SECRET_KEY[1];
-    temp->buffer[12] = SECRET_KEY[1];
-    temp->buffer[13] = SECRET_KEY[1];
-    temp->buffer[14] = SECRET_KEY[1];
-    temp->buffer[15] = SECRET_KEY[1];
+    temp->buffer[2] = SECRET_KEY[2];
+    temp->buffer[3] = SECRET_KEY[3];
+    temp->buffer[4] = SECRET_KEY[4];
+    temp->buffer[5] = SECRET_KEY[5];
+    temp->buffer[6] = SECRET_KEY[6];
+    temp->buffer[7] = SECRET_KEY[7];
+    temp->buffer[8] = SECRET_KEY[8];
+    temp->buffer[9] = SECRET_KEY[9];
+    temp->buffer[10] = SECRET_KEY[10];
+    temp->buffer[11] = SECRET_KEY[11];
+    temp->buffer[12] = SECRET_KEY[12];
+    temp->buffer[13] = SECRET_KEY[13];
+    temp->buffer[14] = SECRET_KEY[14];
+    temp->buffer[15] = SECRET_KEY[15];
 
     // Limit copy size to prevent buffer overflow and verifier issues
     size_t max_copy = data_len;
@@ -526,6 +526,8 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
     struct hdr_cursor nh = { .pos = data };
     BYTE hash_result[SHA256_BLOCK_SIZE];
 
+    __builtin_memset(hash_result, 0, SHA256_BLOCK_SIZE);
+
     eth_type = parse_ethhdr(&nh, data_end, &eth);
     if (eth_type < 0) {
         action = XDP_ABORTED;
@@ -557,14 +559,15 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
         //bpf_printk("IP Header dump:\n");
         //bpf_printk("IP Header size:%d\n", header_size);
         //print_hex((const unsigned char *)iphdr, header_size);
-        //dump_ip_header(iphdr);
+        dump_ip_header(iphdr);
+        //bpf_printk("Raw IP header bytes used for hash calculation:\n");
         //print_hex((const unsigned char *)iphdr, 20);
 
         // Calculate hash of IP header with secret key
         int ret = compute_keyed_hash(ctx, (BYTE *)iphdr, header_size, hash_result);
-        //bpf_printk("Hash result:");
-        //print_hex((const unsigned char *) hash_result, SHA256_BLOCK_SIZE);
 
+        //bpf_printk("Hash result:\n");
+        //print_hex((const unsigned char *) hash_result, SHA256_BLOCK_SIZE);
 
         // Check if hash calculation succeeded
         if (ret == 0) {
