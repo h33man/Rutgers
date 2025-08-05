@@ -20,6 +20,7 @@
 #include <linux/types.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
@@ -31,7 +32,6 @@
 #include "../common/xdp_stats_kern_user.h"
 #include "../common/xdp_stats_kern.h"
 
-#if 1
 #include "sha256.h"
 
 /****************************** MACROS ******************************/
@@ -47,6 +47,7 @@
 
 /* IP Options for hash storage */
 #define IP_OPT_HASH_ID 25  /* Custom option identifier */
+#define IP_OPT_HASH_ID2 25  /* Custom option identifier */
 #define IP_OPT_HASH_LEN 36 /* Option length: 4 (header) + 32 (SHA256) */
 
 /* Define Ethernet header size */
@@ -214,7 +215,6 @@ static __always_inline int sha256_update(const BYTE data[], size_t len)
     return 0;
 }
 
-#if 1
 static __always_inline int sha256_final(BYTE hash[])
 {
     __u32 key = 0;
@@ -343,258 +343,6 @@ static __always_inline int sha256_final(BYTE hash[])
     }
     return 0;
 }
-#else
-static __always_inline int sha256_final(BYTE hash[])
-{
-    __u32 key = 0;
-    SHA256_CTX *ctx;
-    WORD i;
-
-    // Get context from map
-    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
-    if (!ctx)
-        return -1;
-
-    i = ctx->datalen;
-
-    // Make sure we don't go out of bounds
-    if (i >= 64) {
-        i = 0;
-    }
-
-    // Pad whatever data is left in the buffer.
-    if (ctx->datalen < 56) {
-        if (i < 64) {
-            ctx->data[i++] = 0x80;
-        }
-
-        // Ensure i stays within bounds - FIXED: Use simple loop instead of while
-        #pragma unroll
-        for (int j = 0; j < 56; j++) {
-            if (i < 56 && i < 64) {
-                ctx->data[i] = 0x00;
-                i++;
-            }
-        }
-    }
-    else {
-        if (i < 64) {
-            ctx->data[i++] = 0x80;
-        }
-
-        // FIXED: Use simple loop instead of while
-        #pragma unroll
-        for (int j = 0; j < 64; j++) {
-            if (i < 64) {
-                ctx->data[i] = 0x00;
-                i++;
-            }
-        }
-
-        sha256_transform(ctx->data);
-
-        // FIXED: Use explicit loop instead of for loop with variable bounds
-        #pragma unroll
-        for (int j = 0; j < 56; j++) {
-            if (j < 56 && j < 64) {
-                ctx->data[j] = 0x00;
-            }
-        }
-        i = 56; // Set i to 56 after clearing
-    }
-
-    // Append to the padding the total message's length in bits and transform.
-    ctx->bitlen += ctx->datalen * 8;
-
-    // FIXED: Avoid complex bit shifting that might call helper functions
-    // Store length as big-endian 64-bit value manually
-    __u64 total_bits = ctx->bitlen;
-
-    // Extract bytes manually to avoid complex bit operations
-    BYTE len_bytes[8];
-    len_bytes[0] = (total_bits >> 56) & 0xFF;
-    len_bytes[1] = (total_bits >> 48) & 0xFF;
-    len_bytes[2] = (total_bits >> 40) & 0xFF;
-    len_bytes[3] = (total_bits >> 32) & 0xFF;
-    len_bytes[4] = (total_bits >> 24) & 0xFF;
-    len_bytes[5] = (total_bits >> 16) & 0xFF;
-    len_bytes[6] = (total_bits >> 8) & 0xFF;
-    len_bytes[7] = total_bits & 0xFF;
-
-    // Copy length bytes to end of block with explicit bounds checking
-    if (56 < 64) ctx->data[56] = len_bytes[0];
-    if (57 < 64) ctx->data[57] = len_bytes[1];
-    if (58 < 64) ctx->data[58] = len_bytes[2];
-    if (59 < 64) ctx->data[59] = len_bytes[3];
-    if (60 < 64) ctx->data[60] = len_bytes[4];
-    if (61 < 64) ctx->data[61] = len_bytes[5];
-    if (62 < 64) ctx->data[62] = len_bytes[6];
-    if (63 < 64) ctx->data[63] = len_bytes[7];
-
-    sha256_transform(ctx->data);
-
-    // FIXED: Simplify final hash extraction to avoid complex bit operations
-    // Since this implementation uses little endian byte ordering and SHA uses big endian,
-    // reverse all the bytes when copying the final state to the output hash.
-
-    // Process each 32-bit word separately to avoid complex loops
-    // Word 0
-    if (0 < 32) hash[0] = (ctx->state[0] >> 24) & 0xFF;
-    if (1 < 32) hash[1] = (ctx->state[0] >> 16) & 0xFF;
-    if (2 < 32) hash[2] = (ctx->state[0] >> 8) & 0xFF;
-    if (3 < 32) hash[3] = ctx->state[0] & 0xFF;
-
-    // Word 1
-    if (4 < 32) hash[4] = (ctx->state[1] >> 24) & 0xFF;
-    if (5 < 32) hash[5] = (ctx->state[1] >> 16) & 0xFF;
-    if (6 < 32) hash[6] = (ctx->state[1] >> 8) & 0xFF;
-    if (7 < 32) hash[7] = ctx->state[1] & 0xFF;
-
-    // Word 2
-    if (8 < 32) hash[8] = (ctx->state[2] >> 24) & 0xFF;
-    if (9 < 32) hash[9] = (ctx->state[2] >> 16) & 0xFF;
-    if (10 < 32) hash[10] = (ctx->state[2] >> 8) & 0xFF;
-    if (11 < 32) hash[11] = ctx->state[2] & 0xFF;
-
-    // Word 3
-    if (12 < 32) hash[12] = (ctx->state[3] >> 24) & 0xFF;
-    if (13 < 32) hash[13] = (ctx->state[3] >> 16) & 0xFF;
-    if (14 < 32) hash[14] = (ctx->state[3] >> 8) & 0xFF;
-    if (15 < 32) hash[15] = ctx->state[3] & 0xFF;
-
-    // Word 4
-    if (16 < 32) hash[16] = (ctx->state[4] >> 24) & 0xFF;
-    if (17 < 32) hash[17] = (ctx->state[4] >> 16) & 0xFF;
-    if (18 < 32) hash[18] = (ctx->state[4] >> 8) & 0xFF;
-    if (19 < 32) hash[19] = ctx->state[4] & 0xFF;
-
-    // Word 5
-    if (20 < 32) hash[20] = (ctx->state[5] >> 24) & 0xFF;
-    if (21 < 32) hash[21] = (ctx->state[5] >> 16) & 0xFF;
-    if (22 < 32) hash[22] = (ctx->state[5] >> 8) & 0xFF;
-    if (23 < 32) hash[23] = ctx->state[5] & 0xFF;
-
-    // Word 6
-    if (24 < 32) hash[24] = (ctx->state[6] >> 24) & 0xFF;
-    if (25 < 32) hash[25] = (ctx->state[6] >> 16) & 0xFF;
-    if (26 < 32) hash[26] = (ctx->state[6] >> 8) & 0xFF;
-    if (27 < 32) hash[27] = ctx->state[6] & 0xFF;
-
-    // Word 7
-    if (28 < 32) hash[28] = (ctx->state[7] >> 24) & 0xFF;
-    if (29 < 32) hash[29] = (ctx->state[7] >> 16) & 0xFF;
-    if (30 < 32) hash[30] = (ctx->state[7] >> 8) & 0xFF;
-    if (31 < 32) hash[31] = ctx->state[7] & 0xFF;
-
-    return 0;
-}
-#endif
-
-/**
- * Calculate the IP header checksum correctly
- *
- * @param header Pointer to the IP header bytes
- * @param len Length of the header in bytes
- * @return The calculated checksum
- */
-static __always_inline uint16_t calculate_ip_checksum(const void *header, int len) {
-    const uint16_t *buf = header;
-    uint32_t sum = 0;
-
-    // Sum all 16-bit words
-    for (int i = 0; i < len / 2; i++) {
-        if (i >= len / 2) break; // Explicit boundary check for verifier
-        sum += buf[i];
-    }
-
-    // Add odd byte if present (should not happen with IP headers)
-    if (len % 2) {
-        sum += ((const uint8_t *)header)[len - 1];
-    }
-
-    // Fold 32-bit sum to 16 bits
-    while (sum >> 16) {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-
-    // Return one's complement
-    return ~sum;
-}
-
-static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
-        struct iphdr *ip_orig, BYTE hash[SHA256_BLOCK_SIZE])
-{
-    void *data_end = (void *)(long)ctx->data_end;
-    void *data = (void *)(long)ctx->data;
-    uint8_t headers_copy[ETHERNET_HEADER_SIZE + sizeof(struct iphdr)];
-    uint8_t option_len = IP_OPT_HASH_LEN;
-    int i;
-
-    // Save the original headers (Ethernet + IP)
-    if ((void *)data + sizeof(headers_copy) > data_end)
-        return -1;
-
-    __builtin_memcpy(headers_copy, data, sizeof(headers_copy));
-
-    // Add space for the IP option
-    if (bpf_xdp_adjust_head(ctx, 0 - (int)IP_OPT_HASH_LEN))
-        return -1;
-
-    // After adjust_head, all previous pointers are invalidated
-    data_end = (void *)(long)ctx->data_end;
-    data = (void *)(long)ctx->data;
-
-    // Ensure we have enough space for the headers
-    if ((void *)data + sizeof(headers_copy) > data_end)
-        return -1;
-
-    // Copy back the original headers
-    __builtin_memcpy(data, headers_copy, sizeof(headers_copy));
-
-    // Get pointer to the new IP header
-    struct iphdr *new_ip = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
-    if ((void *)(new_ip + 1) > data_end)
-        return -1;
-
-    // Update the IP header
-    new_ip->ihl = (sizeof(struct iphdr) + IP_OPT_HASH_LEN) / 4;
-    new_ip->tot_len = bpf_htons(bpf_ntohs(new_ip->tot_len) + IP_OPT_HASH_LEN);
-    
-    // Reset checksum field to zero before calculating new checksum
-    new_ip->check = 0;
-
-    // Now add our option after the IP header
-    uint8_t *options = (uint8_t *)(new_ip + 1);
-    if ((void *)(options + option_len) > data_end)
-        return -1;
-
-    // Set up the IP option
-    options[0] = IP_OPT_HASH_ID;    // Option ID
-    options[1] = option_len;         // Option length
-    options[2] = 0x12;               // Magic value 1
-    options[3] = 0x34;               // Magic value 2
-
-    // Copy the hash value in chunks of 4 bytes
-    #pragma unroll
-    for (i = 0; i < 32; i += 4) {
-        if (i + 3 < 32 && 4 + i + 3 < option_len) {
-            options[4 + i] = hash[i];
-            options[4 + i + 1] = hash[i + 1];
-            options[4 + i + 2] = hash[i + 2];
-            options[4 + i + 3] = hash[i + 3];
-        }
-    }
-
-    // Calculate checksum on the entire IP header including options
-    int header_len = new_ip->ihl * 4;
-    new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
-    
-    // Debug: Print calculated checksum
-    bpf_printk("New IP header length: %d bytes\n", header_len);
-    bpf_printk("New IP checksum: 0x%04x\n", new_ip->check);
-
-    return 0;
-}
 
 #if 0
 // Function to print a hex dump of binary data
@@ -706,212 +454,18 @@ static __always_inline int compute_keyed_hash(struct xdp_md *ctx, const BYTE *da
     return 0; // Success
 }
 
-/**
- * Extract hash from IP options - validate header length first
- * @param ctx XDP context
- * @param iphdr IP header pointer
- * @param extracted_hash Buffer to store extracted hash
- * @return 0 on success, -1 on failure
- */
-static __always_inline int extract_ip_option_hash(struct xdp_md *ctx,
-        struct iphdr *iphdr, BYTE extracted_hash[SHA256_BLOCK_SIZE])
+// Compute hash from map data (no packet bounds checking needed)
+static __always_inline int compute_keyed_hash_from_map(const BYTE *data, size_t data_len, BYTE hash[SHA256_BLOCK_SIZE])
 {
-    void *data_end = (void *)(long)ctx->data_end;
-
-    // The iphdr pointer was already validated by caller, but we need to revalidate
-    // the entire IP header including options since that's what the verifier needs
-
-    int total_ip_len = iphdr->ihl * 4;
-
-    // Validate ENTIRE IP header including options
-    if ((void *)iphdr + total_ip_len > data_end) {
-        bpf_printk("IP header + options exceed packet boundary\n");
-        return -1;
-    }
-
-    // Only proceed if there are options
-    if (total_ip_len <= 20) {
-        bpf_printk("No IP options present\n");
-        return -1;
-    }
-
-    int options_len = total_ip_len - 20;
-    if (options_len < IP_OPT_HASH_LEN) {
-        bpf_printk("Not enough option space: need %d, have %d\n",
-                   IP_OPT_HASH_LEN, options_len);
-        return -1;
-    }
-
-    // Now we can safely access options
-    unsigned char *options = (unsigned char *)iphdr + 20;
-
-    bpf_printk("Options area validated, checking option header...\n");
-
-    // Check option header (4 bytes)
-    // Weird: only works this way
-    if (options[1] == IP_OPT_HASH_ID &&
-        options[0] == IP_OPT_HASH_ID &&
-        options[1] == IP_OPT_HASH_LEN &&
-        options[2] == 0x12 &&
-        options[3] == 0x34) {
-
-        bpf_printk("Hash option found, extracting hash...\n");
-
-        // Copy the hash (32 bytes starting at offset 4)
-        #pragma unroll
-        for (int i = 0; i < 32; i++) {
-            extracted_hash[i] = options[4 + i];
-        }
-
-        return 0; // Success
-    }
-
-    bpf_printk("Hash option header not found\n");
-    return -1;
-}
-
-/**
- * Remove IP option hash and adjust packet
- * @param ctx XDP context
- * @param iphdr IP header pointer
- * @return 0 on success, -1 on failure
- */
-static __always_inline int remove_ip_option_hash(struct xdp_md *ctx, struct iphdr *iphdr)
-{
-    void *data_end = (void *)(long)ctx->data_end;
-
-    int total_ip_len = iphdr->ihl * 4;
-
-    // Validate ENTIRE IP header including options
-    if ((void *)iphdr + total_ip_len > data_end) {
-        return -1;
-    }
-
-    // Check if there are options
-    if (total_ip_len <= 20)
-        return -1;
-
-    int options_len = total_ip_len - 20;
-    unsigned char *options = (unsigned char *)iphdr + 20;
-
-    // Find our hash option - assume it's the first option for simplicity
-    if (options_len >= IP_OPT_HASH_LEN &&
-        options[0] == IP_OPT_HASH_ID &&
-        options[1] == IP_OPT_HASH_LEN &&
-        options[2] == 0x12 &&
-        options[3] == 0x34) {
-
-        // Calculate how much data to move after removing our option
-        int bytes_after_option = options_len - IP_OPT_HASH_LEN;
-
-        // Move remaining options to fill the gap
-        if (bytes_after_option > 0) {
-            unsigned char *src = options + IP_OPT_HASH_LEN;
-            unsigned char *dst = options;
-
-            // Limit copy to prevent verifier issues
-            int copy_len = bytes_after_option;
-            if (copy_len > 20) copy_len = 20;
-
-            // Copy remaining options
-            #pragma unroll
-            for (int i = 0; i < 20; i++) {
-                if (i < copy_len) {
-                    dst[i] = src[i];
-                }
-            }
-        }
-
-        // Update IP header
-        unsigned int new_header_len_bytes = (unsigned int)total_ip_len - IP_OPT_HASH_LEN;
-        iphdr->ihl = new_header_len_bytes >> 2;
-        iphdr->tot_len = bpf_htons(bpf_ntohs(iphdr->tot_len) - IP_OPT_HASH_LEN);
-
-        // Reset checksum field to zero before calculating new checksum
-        iphdr->check = 0;
-
-        // Calculate new checksum
-        int new_header_len = iphdr->ihl * 4;
-        iphdr->check = calculate_ip_checksum((const void *)iphdr, new_header_len);
-
-        // Shrink packet by removing the option space
-        if (bpf_xdp_adjust_head(ctx, IP_OPT_HASH_LEN))
-            return -1;
-
-        return 0; // Success
-    }
-
-    return -1; // Hash option not found
-}
-
-/**
- * Verify hash in IP packet
- * @param ctx XDP context
- * @param iphdr IP header pointer
- * @return 0 if hash is valid, -1 if invalid or missing
- */
-static __always_inline int verify_ip_hash(struct xdp_md *ctx, struct iphdr *iphdr)
-{
-    BYTE extracted_hash[SHA256_BLOCK_SIZE];
-    BYTE computed_hash[SHA256_BLOCK_SIZE];
     __u32 key = 0;
     struct {BYTE buffer[128];} *temp;
-    void *data_end = (void *)(long)ctx->data_end;
-    int i;
 
-    __builtin_memset(extracted_hash, 0, SHA256_BLOCK_SIZE);
-    __builtin_memset(computed_hash, 0, SHA256_BLOCK_SIZE);
-
-    // Extract hash from IP options using working function
-    if (extract_ip_option_hash(ctx, iphdr, extracted_hash) < 0) {
-        bpf_printk("Hash option not found in packet\n");
-        return -1;
-    }
-
-    bpf_printk("Extracted hash from packet:\n");
-    //print_hex(extracted_hash, SHA256_BLOCK_SIZE);
-
-    // Create a copy of IP header without the hash option for computation
-    // We need to reconstruct what the original header looked like
-
-    // Get temp buffer
+    // Get temp buffer from map
     temp = bpf_map_lookup_elem(&sha256_temp_map, &key);
     if (!temp)
         return -1;
 
-    // Validate we can access the base IP header for copying
-    if ((void *)iphdr + 20 > data_end)
-        return -1;
-
-    // Copy the base IP header (20 bytes) - manually copy each byte
-    temp->buffer[16 + 0] = ((BYTE *)iphdr)[0];
-    temp->buffer[16 + 1] = ((BYTE *)iphdr)[1];
-    temp->buffer[16 + 2] = ((BYTE *)iphdr)[2];
-    temp->buffer[16 + 3] = ((BYTE *)iphdr)[3];
-    temp->buffer[16 + 4] = ((BYTE *)iphdr)[4];
-    temp->buffer[16 + 5] = ((BYTE *)iphdr)[5];
-    temp->buffer[16 + 6] = ((BYTE *)iphdr)[6];
-    temp->buffer[16 + 7] = ((BYTE *)iphdr)[7];
-    temp->buffer[16 + 8] = ((BYTE *)iphdr)[8];
-    temp->buffer[16 + 9] = ((BYTE *)iphdr)[9];
-    temp->buffer[16 + 10] = ((BYTE *)iphdr)[10];
-    temp->buffer[16 + 11] = ((BYTE *)iphdr)[11];
-    temp->buffer[16 + 12] = ((BYTE *)iphdr)[12];
-    temp->buffer[16 + 13] = ((BYTE *)iphdr)[13];
-    temp->buffer[16 + 14] = ((BYTE *)iphdr)[14];
-    temp->buffer[16 + 15] = ((BYTE *)iphdr)[15];
-    temp->buffer[16 + 16] = ((BYTE *)iphdr)[16];
-    temp->buffer[16 + 17] = ((BYTE *)iphdr)[17];
-    temp->buffer[16 + 18] = ((BYTE *)iphdr)[18];
-    temp->buffer[16 + 19] = ((BYTE *)iphdr)[19];
-
-    // Modify the copied header to match original (before hash was added)
-    struct iphdr *temp_hdr = (struct iphdr *)(temp->buffer + 16);
-    temp_hdr->ihl = 5; // Standard IP header length (20 bytes)
-    temp_hdr->tot_len = bpf_htons(bpf_ntohs(iphdr->tot_len) - IP_OPT_HASH_LEN);
-    temp_hdr->check = 0; // Checksum was zero when hash was calculated
-
-    // Initialize buffer with secret key
+    // Initialize buffer with key using explicit assignments
     temp->buffer[0] = SECRET_KEY[0];
     temp->buffer[1] = SECRET_KEY[1];
     temp->buffer[2] = SECRET_KEY[2];
@@ -929,105 +483,441 @@ static __always_inline int verify_ip_hash(struct xdp_md *ctx, struct iphdr *iphd
     temp->buffer[14] = SECRET_KEY[14];
     temp->buffer[15] = SECRET_KEY[15];
 
-    // Compute hash of reconstructed original header using your existing function
-    // NOTE: We're not calling compute_keyed_hash directly because it expects
-    // packet data, but we need to hash our reconstructed header
+    // Limit copy size to prevent buffer overflow
+    size_t max_copy = data_len;
+    if (max_copy > 20)  // Standard IPv4 header is 20 bytes
+        max_copy = 20;
+
+    // Copy data bytes directly - no packet bounds checking needed since data is from map
+    if (max_copy >= 1) temp->buffer[16 + 0] = data[0];
+    if (max_copy >= 2) temp->buffer[16 + 1] = data[1];
+    if (max_copy >= 3) temp->buffer[16 + 2] = data[2];
+    if (max_copy >= 4) temp->buffer[16 + 3] = data[3];
+    if (max_copy >= 5) temp->buffer[16 + 4] = data[4];
+    if (max_copy >= 6) temp->buffer[16 + 5] = data[5];
+    if (max_copy >= 7) temp->buffer[16 + 6] = data[6];
+    if (max_copy >= 8) temp->buffer[16 + 7] = data[7];
+    if (max_copy >= 9) temp->buffer[16 + 8] = data[8];
+    if (max_copy >= 10) temp->buffer[16 + 9] = data[9];
+    if (max_copy >= 11) temp->buffer[16 + 10] = data[10];
+    if (max_copy >= 12) temp->buffer[16 + 11] = data[11];
+    if (max_copy >= 13) temp->buffer[16 + 12] = data[12];
+    if (max_copy >= 14) temp->buffer[16 + 13] = data[13];
+    if (max_copy >= 15) temp->buffer[16 + 14] = data[14];
+    if (max_copy >= 16) temp->buffer[16 + 15] = data[15];
+    if (max_copy >= 17) temp->buffer[16 + 16] = data[16];
+    if (max_copy >= 18) temp->buffer[16 + 17] = data[17];
+    if (max_copy >= 19) temp->buffer[16 + 18] = data[18];
+    if (max_copy >= 20) temp->buffer[16 + 19] = data[19];
+
+    // Compute hash
     sha256_init();
-    sha256_update(temp->buffer, 16 + 20); // Key + standard IP header
-    sha256_final(computed_hash);
+    sha256_update(temp->buffer, 16 + max_copy);
+    sha256_final(hash);
 
-    bpf_printk("Computed hash for verification:\n");
-    //print_hex(computed_hash, SHA256_BLOCK_SIZE);
-
-    // Compare hashes
-    for (i = 0; i < SHA256_BLOCK_SIZE; i++) {
-        if (extracted_hash[i] != computed_hash[i]) {
-            bpf_printk("Hash verification failed at byte %d: expected 0x%02x, got 0x%02x\n",
-                      i, computed_hash[i], extracted_hash[i]);
-            return -1; // Hash mismatch
-        }
-    }
-
-    bpf_printk("Hash verification successful!\n");
-    return 0; // Hash verified
+    return 0;
 }
 
-SEC("xdp_ip_hash_verify")
-int xdp_ip_hash_verify_func(struct xdp_md *ctx)
+/**
+ * Calculate the IP header checksum correctly
+ *
+ * @param header Pointer to the IP header bytes
+ * @param len Length of the header in bytes
+ * @return The calculated checksum
+ */
+static __always_inline uint16_t calculate_ip_checksum(const void *header, int len) {
+    const uint16_t *buf = header;
+    uint32_t sum = 0;
+
+    // Sum all 16-bit words
+    for (int i = 0; i < len / 2; i++) {
+        if (i >= len / 2) break; // Explicit boundary check for verifier
+        sum += buf[i];
+    }
+
+    // Add odd byte if present (should not happen with IP headers)
+    if (len % 2) {
+        sum += ((const uint8_t *)header)[len - 1];
+    }
+
+    // Fold 32-bit sum to 16 bits
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    // Return one's complement
+    return ~sum;
+}
+
+static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
+        struct iphdr *ip_orig, BYTE hash[SHA256_BLOCK_SIZE])
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
+    uint8_t headers_copy[ETHERNET_HEADER_SIZE + sizeof(struct iphdr)];
+    uint8_t option_len = IP_OPT_HASH_LEN;
+    int i;
+
+    // Save the original headers (Ethernet + IP)
+    if ((void *)data + sizeof(headers_copy) > data_end)
+        return -1;
+
+    __builtin_memcpy(headers_copy, data, sizeof(headers_copy));
+
+    // Add space for the IP option
+    if (bpf_xdp_adjust_head(ctx, 0 - (int)IP_OPT_HASH_LEN))
+        return -1;
+
+    // After adjust_head, all previous pointers are invalidated
+    data_end = (void *)(long)ctx->data_end;
+    data = (void *)(long)ctx->data;
+
+    // Ensure we have enough space for the headers
+    if ((void *)data + sizeof(headers_copy) > data_end)
+        return -1;
+
+    // Copy back the original headers
+    __builtin_memcpy(data, headers_copy, sizeof(headers_copy));
+
+    // Get pointer to the new IP header
+    struct iphdr *new_ip = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
+    if ((void *)(new_ip + 1) > data_end)
+        return -1;
+
+    // Update the IP header
+    new_ip->ihl = (sizeof(struct iphdr) + IP_OPT_HASH_LEN) / 4;
+    new_ip->tot_len = bpf_htons(bpf_ntohs(new_ip->tot_len) + IP_OPT_HASH_LEN);
+    
+    // Reset checksum field to zero before calculating new checksum
+    new_ip->check = 0;
+
+    // Now add our option after the IP header
+    uint8_t *options = (uint8_t *)(new_ip + 1);
+    if ((void *)(options + option_len) > data_end)
+        return -1;
+
+    // Set up the IP option
+    options[0] = IP_OPT_HASH_ID;    // Option ID
+    options[1] = option_len;         // Option length
+    options[2] = 0x12;               // Magic value 1
+    options[3] = 0x34;               // Magic value 2
+
+    // Copy the hash value in chunks of 4 bytes
+    #pragma unroll
+    for (i = 0; i < 32; i += 4) {
+        if (i + 3 < 32 && 4 + i + 3 < option_len) {
+            options[4 + i] = hash[i];
+            options[4 + i + 1] = hash[i + 1];
+            options[4 + i + 2] = hash[i + 2];
+            options[4 + i + 3] = hash[i + 3];
+        }
+    }
+
+    // Calculate checksum on the entire IP header including options
+    int header_len = new_ip->ihl * 4;
+    new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
+    
+    // Debug: Print calculated checksum
+    bpf_printk("New IP header length: %d bytes\n", header_len);
+    bpf_printk("New IP checksum: 0x%04x\n", new_ip->check);
+
+    return 0;
+}
+
+// Define a map for verification to avoid stack overflow and provide bounded access
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct {
+        BYTE extracted_hash[SHA256_BLOCK_SIZE];
+        BYTE computed_hash[SHA256_BLOCK_SIZE];
+        struct iphdr original_header;
+        uint8_t headers_buffer[ETHERNET_HEADER_SIZE + 60]; // Max IP header size
+    });
+} verify_map SEC(".maps");
+
+/**
+ * Verify IP hash from packet data directly
+ * @param ctx XDP context
+ * @return 0 on success, -1 on error, -2 on hash mismatch
+ */
+static __always_inline int verify_ip_hash_direct(struct xdp_md *ctx)
+{
+    __u32 key = 0;
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+
+    struct {
+        BYTE extracted_hash[SHA256_BLOCK_SIZE];
+        BYTE computed_hash[SHA256_BLOCK_SIZE];
+        struct iphdr original_header;
+        uint8_t headers_buffer[ETHERNET_HEADER_SIZE + 60];
+    } *verify_ctx;
+
+    // Get verification context from map
+    verify_ctx = bpf_map_lookup_elem(&verify_map, &key);
+    if (!verify_ctx)
+        return -1;
+
+    // Get IP header directly from packet
+    struct iphdr *ip_header = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
+    if ((void *)(ip_header + 1) > data_end)
+        return -1;
+
+    int header_size = ip_header->ihl * 4;
+    int options_len = header_size - sizeof(struct iphdr);
+
+    // Validate header size bounds
+    if (header_size < 20 || header_size > 60) {
+        return -1;
+    }
+
+    // Ensure we can read the full IP header
+    if ((void *)ip_header + header_size > data_end) {
+        return -1;
+    }
+
+    // Check if there are any options
+    if (options_len <= 0) {
+        bpf_printk("No IP options to verify\n");
+        return -1;
+    }
+
+    // Copy the IP header to our map buffer for safe access
+    uint8_t *safe_ip_header = verify_ctx->headers_buffer + ETHERNET_HEADER_SIZE;
+
+    // Copy header byte by byte with explicit bounds checking
+    #pragma unroll
+    for (int i = 0; i < 60; i++) {
+        if (i < header_size && (void *)ip_header + i < data_end) {
+            safe_ip_header[i] = *((uint8_t *)ip_header + i);
+        } else if (i < 60) {
+            safe_ip_header[i] = 0;
+        }
+    }
+
+    // Now work with the safe copy
+    struct iphdr *safe_ip = (struct iphdr *)safe_ip_header;
+    uint8_t *options = safe_ip_header + sizeof(struct iphdr);
+
+    // Initialize hash arrays
+    #pragma unroll
+    for (int x = 0; x < 32; x++) {
+        verify_ctx->extracted_hash[x] = 0;
+        verify_ctx->computed_hash[x] = 0;
+    }
+
+    // Search for our hash option with explicit unrolled checks
+    // Since we know our option is exactly IP_OPT_HASH_LEN (36 bytes),
+    // we can check specific positions where it might start
+    int found_hash = 0;
+
+    // Check each possible starting position for our option
+    // Max 4 options can fit in 40 bytes, so check positions 0, 4, 8, 12, etc.
+    #pragma unroll
+    for (int start_pos = 0; start_pos <= 4 && !found_hash; start_pos++) {
+        if (start_pos >= options_len) continue;
+
+        // Check if we have enough space for our option at this position
+        if (start_pos + IP_OPT_HASH_LEN > options_len) continue;
+
+        uint8_t opt_type = options[start_pos];
+
+        // End of options
+        if (opt_type == 0) break;
+
+        // Skip NOP
+        if (opt_type == 1) continue;
+
+        // Check if this could be our hash option
+        if (start_pos + 1 < options_len) {
+            uint8_t opt_len = options[start_pos + 1];
+
+            if (opt_type == IP_OPT_HASH_ID && opt_len == IP_OPT_HASH_LEN) {
+                // Check magic bytes
+                if (start_pos + 3 < options_len &&
+                    options[start_pos + 2] == 0x12 &&
+                    options[start_pos + 3] == 0x34) {
+
+                    bpf_printk("Found hash option for verification at pos %d\n", start_pos);
+
+                    // Extract the hash (32 bytes starting at offset start_pos + 4)
+                    #pragma unroll
+                    for (int j = 0; j < 32; j++) {
+                        if (start_pos + 4 + j < options_len && j < SHA256_BLOCK_SIZE) {
+                            verify_ctx->extracted_hash[j] = options[start_pos + 4 + j];
+                        }
+                    }
+
+                    found_hash = 1;
+                }
+            }
+        }
+    }
+
+    if (!found_hash) {
+        bpf_printk("Hash option not found\n");
+        return -1;
+    }
+
+    // Reconstruct original IP header (without options) for verification
+    verify_ctx->original_header = *safe_ip;
+    verify_ctx->original_header.ihl = 5; // Standard 20-byte header
+    verify_ctx->original_header.tot_len = bpf_htons(bpf_ntohs(verify_ctx->original_header.tot_len) - options_len);
+    verify_ctx->original_header.check = 0; // Clear checksum as it was during original calculation
+
+    // Compute hash of the original header
+    int ret = compute_keyed_hash_from_map((BYTE *)&verify_ctx->original_header,
+                                        sizeof(struct iphdr), verify_ctx->computed_hash);
+
+    if (ret != 0) {
+        bpf_printk("Failed to compute hash for verification\n");
+        return -1;
+    }
+
+    // Compare hashes byte by byte
+    int hash_match = 1;
+    #pragma unroll
+    for (int k = 0; k < 32; k++) {
+        if (k < SHA256_BLOCK_SIZE &&
+            verify_ctx->extracted_hash[k] != verify_ctx->computed_hash[k]) {
+            hash_match = 0;
+            break;
+        }
+    }
+
+    if (hash_match) {
+        bpf_printk("Hash verification PASSED\n");
+        return 0; // Success
+    } else {
+        bpf_printk("Hash verification FAILED - packet may be tampered\n");
+        return -2; // Hash mismatch
+    }
+}
+
+static __always_inline int remove_ip_option_hash(struct xdp_md *ctx,
+        struct iphdr *ip_orig)
+{
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+    uint8_t headers_copy[ETHERNET_HEADER_SIZE + sizeof(struct iphdr)];
+
+    // Save the original headers (Ethernet + IP)
+    if ((void *)data + sizeof(headers_copy) > data_end)
+        return -1;
+
+    __builtin_memcpy(headers_copy, data, sizeof(headers_copy));
+
+    // *** NEW: Verify hash before removing ***
+    int verify_result = verify_ip_hash_direct(ctx);
+    if (verify_result == -2) {
+        // Hash verification failed - drop the packet
+        bpf_printk("SECURITY: Dropping packet due to hash verification failure\n");
+        return -2; // Special return code for hash failure
+    } else if (verify_result == -1) {
+        // Hash option not found or other error - continue with removal attempt
+        bpf_printk("Hash verification inconclusive, proceeding with removal\n");
+    } else {
+        // Hash verification passed
+        bpf_printk("Hash verification passed, proceeding with removal\n");
+    }
+
+    // Remove space for the IP option
+    if (bpf_xdp_adjust_head(ctx, (int)IP_OPT_HASH_LEN))
+        return -1;
+
+    // After adjust_head, all previous pointers are invalidated
+    data_end = (void *)(long)ctx->data_end;
+    data = (void *)(long)ctx->data;
+
+    // Ensure we have enough space for the headers
+    if ((void *)data + sizeof(headers_copy) > data_end)
+        return -1;
+
+    // Copy back the original headers
+    __builtin_memcpy(data, headers_copy, sizeof(headers_copy));
+
+    // Get pointer to the new IP header
+    struct iphdr *new_ip = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
+    if ((void *)(new_ip + 1) > data_end)
+        return -1;
+
+    // Update the IP header
+    new_ip->ihl = (sizeof(struct iphdr)) / 4;
+    new_ip->tot_len = bpf_htons(bpf_ntohs(new_ip->tot_len) - IP_OPT_HASH_LEN);
+
+    // Reset checksum field to zero before calculating new checksum
+    new_ip->check = 0;
+
+    // Calculate checksum on the entire IP header
+    int header_len = new_ip->ihl * 4;
+    new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
+
+    // Debug: Print calculated checksum
+    bpf_printk("New IP header length: %d bytes\n", header_len);
+    bpf_printk("New IP checksum: 0x%04x\n", new_ip->check);
+
+    return 0;
+}
+
+/**
+ * Simple receiver that just removes hash options without verification
+ */
+SEC("xdp_ip_hash_verify")
+int xdp_ip_hash_verify_func(struct xdp_md *ctx)
+{
+    int action = XDP_PASS;
+    int eth_type, ip_type;
     struct ethhdr *eth;
     struct iphdr *iphdr;
-    int action = XDP_PASS;
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+    struct hdr_cursor nh = { .pos = data };
 
-    // Get packet size for debugging
-    long packet_size = (long)data_end - (long)data;
-
-    if (packet_size < 34) { // Minimum for Eth + IP
-        return XDP_PASS;
-    }
-
-    // Manual Ethernet header parsing (like xdp_test_option_access)
-    eth = data;
-    if ((void *)(eth + 1) > data_end) {
+    eth_type = parse_ethhdr(&nh, data_end, &eth);
+    if (eth_type < 0) {
         action = XDP_ABORTED;
         goto out;
     }
 
-    if (eth->h_proto != bpf_htons(ETH_P_IP))
-        goto out;
+    // We only process IPv4 packets
+    if (eth_type == bpf_htons(ETH_P_IP)) {
+        ip_type = parse_iphdr(&nh, data_end, &iphdr);
+        if (ip_type < 0) {
+            action = XDP_ABORTED;
+            goto out;
+        }
 
-    // Manual IP header parsing - this is the key fix
-    iphdr = (struct iphdr *)(eth + 1);
+        // Make sure we can access the full header including options
+        int header_size = iphdr->ihl * 4;
+        if ((void *)iphdr + header_size > data_end) {
+            action = XDP_ABORTED;
+            goto out;
+        }
 
-    // First, check if we can read the basic IP header
-    if ((void *)(iphdr + 1) > data_end) {
-        action = XDP_ABORTED;
-        goto out;
-    }
+        bpf_printk("=== Received packet for hash removal ===\n");
+        //dump_ip_header(iphdr);
 
-    // Now check the FULL IP header including options (same as xdp_test_option_access)
-    int ip_header_len = iphdr->ihl * 4;
-    if (ip_header_len < 20 || ip_header_len > 60) {
-        action = XDP_ABORTED;
-        goto out;
-    }
+        // Check if packet has options (IHL > 5 means options present)
+        if (iphdr->ihl > 5) {
+            bpf_printk("IP options present, attempting to remove hash\n");
 
-    // CRITICAL: Validate the entire IP header + options
-    if ((void *)iphdr + ip_header_len > data_end) {
-        action = XDP_ABORTED;
-        goto out;
-    }
-
-    bpf_printk("=== Received packet for hash verification ===\n");
-    bpf_printk("Total packet size: %ld bytes\n", packet_size);
-    bpf_printk("IP header total size: %d bytes\n", ip_header_len);
-    //dump_ip_header(iphdr);
-
-    // Check if packet has our hash option (IHL > 5 means options present)
-    if (iphdr->ihl > 5) {
-        bpf_printk("IP options detected, attempting hash verification\n");
-
-        // Verify the hash using working function
-        if (verify_ip_hash(ctx, iphdr) == 0) {
-            bpf_printk("Hash verification passed, removing option\n");
-
-            // Remove the hash option from the packet
-            if (remove_ip_option_hash(ctx, iphdr) < 0) {
-                bpf_printk("Failed to remove hash option\n");
-                action = XDP_DROP;
-            } else {
+            // Try to remove the hash option
+            if (remove_ip_option_hash(ctx, iphdr) == 0) {
                 bpf_printk("Hash option removed successfully\n");
                 action = XDP_PASS;
+            } else {
+                bpf_printk("Failed to remove hash option or not found, passing anyway\n");
+                action = XDP_PASS; // Pass even if removal fails
             }
         } else {
-            bpf_printk("Hash verification failed, dropping packet\n");
-            action = XDP_DROP;
+            // No options present, pass through normally
+            bpf_printk("No IP options found, passing packet through\n");
+            action = XDP_PASS;
         }
-    } else {
-        // No options present, pass through normally
-        bpf_printk("No IP options found, passing packet through\n");
+    } else if (eth_type == bpf_htons(ETH_P_IPV6)) {
+        // IPv6 processing not implemented
         action = XDP_PASS;
     }
 
@@ -1109,80 +999,10 @@ out:
     return xdp_stats_record_action(ctx, action);
 }
 
-#else
-
-SEC("xdp_patch_ports")
-int xdp_patch_ports_func(struct xdp_md *ctx)
-{
-	int action = XDP_PASS;
-	int eth_type, ip_type;
-	struct ethhdr *eth;
-	struct iphdr *iphdr;
-	struct ipv6hdr *ipv6hdr;
-	struct udphdr *udphdr;
-	struct tcphdr *tcphdr;
-	void *data_end = (void *)(long)ctx->data_end;
-	void *data = (void *)(long)ctx->data;
-	struct hdr_cursor nh = { .pos = data };
-
-	eth_type = parse_ethhdr(&nh, data_end, &eth);
-	if (eth_type < 0) {
-		action = XDP_ABORTED;
-		goto out;
-	}
-
-	if (eth_type == bpf_htons(ETH_P_IP)) {
-		ip_type = parse_iphdr(&nh, data_end, &iphdr);
-	} else if (eth_type == bpf_htons(ETH_P_IPV6)) {
-		ip_type = parse_ip6hdr(&nh, data_end, &ipv6hdr);
-	} else {
-		goto out;
-	}
-
-	if (ip_type == IPPROTO_UDP) {
-		if (parse_udphdr(&nh, data_end, &udphdr) < 0) {
-			action = XDP_ABORTED;
-			goto out;
-		}
-
-		/*
-		 * We need to update the packet checksum when modifying the header.
-		 * RFC1071 contains an algorithm for in-place updating, which is what we use here
-		 * since we're always just decrementing the port number. Another option would be
-		 * to recompute the full checksum, like:
-		 *
-		 * struct udphdr udphdr_old;
-		 * __u32 csum = udphdr->check;
-		 * udphdr_old = *udphdr;
-		 * udphdr->dest = bpf_htons(bpf_ntohs(udphdr->dest) - 1);
-		 * csum = bpf_csum_diff((__be32 *)&udphdr_old, 4, (__be32 *)udphdr, 4, ~csum);
-		 * udphdr->check = csum_fold_helper(csum);
-		 */
-
-		udphdr->dest = bpf_htons(bpf_ntohs(udphdr->dest) - 1);
-		udphdr->check += bpf_htons(1);
-		if (!udphdr->check)
-			udphdr->check += bpf_htons(1);
-	} else if (ip_type == IPPROTO_TCP) {
-		if (parse_tcphdr(&nh, data_end, &tcphdr) < 0) {
-			action = XDP_ABORTED;
-			goto out;
-		}
-		tcphdr->dest = bpf_htons(bpf_ntohs(tcphdr->dest) - 1);
-		tcphdr->check += bpf_htons(1);
-		if (!tcphdr->check)
-			tcphdr->check += bpf_htons(1);
-	}
-
-out:
-	return xdp_stats_record_action(ctx, action);
-}
-
 SEC("xdp_pass")
 int xdp_pass_func(struct xdp_md *ctx)
 {
     return XDP_PASS;
 }
-#endif
 
 char _license[] SEC("license") = "GPL";
