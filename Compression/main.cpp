@@ -10,9 +10,6 @@
 #include <functional>
 #include <unordered_set>
 #include <sstream>
-#include <cctype>      // Add this for tolower, isalnum
-#include <iterator>    // Add this for istreambuf_iterator
-#include <ios>         // Add this for ios flags
 #include <lzma.h>
 
 using namespace std;
@@ -500,7 +497,6 @@ private:
         return dict_words;
     }
 
-    #if 1
     // Modified load_main_dictionary method
     bool load_main_dictionary(const string& dict_file) {
         ifstream infile(dict_file);
@@ -604,113 +600,7 @@ private:
 
         return true;
     }
-    #else
-    // Load main dictionary for decompression
-    bool load_main_dictionary(const string& dict_file) {
-        ifstream infile(dict_file);
-        if (!infile) {
-            cerr << "Error opening dictionary file: " << dict_file << endl;
-            return false;
-        }
 
-        string line;
-        main_decode_dict_words.clear();
-        main_encode_dict_words.clear();
-        main_decode_dict_phrases.clear();
-        main_encode_dict_phrases.clear();
-        main_decode_dict_wildcards.clear();
-        main_encode_dict_wildcards.clear();
-
-        // First line contains compression mode and counts
-        if (!getline(infile, line)) {
-            cerr << "Error reading dictionary file header" << endl;
-            return false;
-        }
-
-        istringstream iss(line);
-        string mode_str;
-        size_t word_count, phrase_count = 0, wildcard_count = 0;
-
-        if (!(iss >> mode_str >> word_count)) {
-            cerr << "Error parsing dictionary header" << endl;
-            return false;
-        }
-
-        compression_mode = parse_mode(mode_str);
-
-        if (compression_mode == CompressionMode::WITH_PHRASES ||
-            compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            iss >> phrase_count;
-        }
-
-        if (compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            iss >> wildcard_count;
-        }
-
-        // Read words
-        for (size_t i = 0; i < word_count && getline(infile, line); ++i) {
-            if (!line.empty()) {
-                main_decode_dict_words.push_back(line);
-                main_encode_dict_words[line] = i;
-            }
-        }
-
-        // Read phrases if mode includes phrases
-        if (compression_mode == CompressionMode::WITH_PHRASES ||
-            compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            for (size_t i = 0; i < phrase_count && getline(infile, line); ++i) {
-                if (!line.empty()) {
-                    istringstream phrase_iss(line);
-                    string word;
-                    vector<string> phrase_words;
-
-                    while (phrase_iss >> word) {
-                        phrase_words.push_back(word);
-                    }
-
-                    if (!phrase_words.empty()) {
-                        string phrase_str = line;
-                        main_decode_dict_phrases.push_back(phrase_words);
-                        main_encode_dict_phrases[phrase_str] = i;
-                    }
-                }
-            }
-        }
-
-        // Read wildcard patterns if mode includes wildcards
-        if (compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            for (size_t i = 0; i < wildcard_count && getline(infile, line); ++i) {
-                if (!line.empty()) {
-                    istringstream wildcard_iss(line);
-                    string word;
-                    vector<string> wildcard_pattern;
-
-                    while (wildcard_iss >> word) {
-                        wildcard_pattern.push_back(word);
-                    }
-
-                    if (!wildcard_pattern.empty()) {
-                        main_decode_dict_wildcards.push_back(wildcard_pattern);
-                        main_encode_dict_wildcards[line] = i;
-                    }
-                }
-            }
-        }
-
-        // Calculate bits needed for main dictionary (words + phrases + wildcards)
-        main_max_bit_length = 0;
-        size_t total_entries = main_decode_dict_words.size() +
-                              main_decode_dict_phrases.size() +
-                              main_decode_dict_wildcards.size();
-        while ((1ULL << main_max_bit_length) < total_entries) {
-            main_max_bit_length++;
-        }
-
-        return true;
-    }
-    #endif
-
-    #if 1
     // Modified write_main_dictionary method
     bool write_main_dictionary(const string& dict_file) {
         ofstream outfile(dict_file);
@@ -763,61 +653,6 @@ private:
 
         return outfile.good();
     }
-    #else
-
-    // Write main dictionary to a file
-    bool write_main_dictionary(const string& dict_file) {
-        ofstream outfile(dict_file);
-        if (!outfile) {
-            cerr << "Error opening dictionary file for writing: " << dict_file << endl;
-            return false;
-        }
-
-        // Write header with mode and counts
-        outfile << mode_to_string(compression_mode) << " " << main_decode_dict_words.size();
-
-        if (compression_mode == CompressionMode::WITH_PHRASES ||
-            compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            outfile << " " << main_decode_dict_phrases.size();
-        }
-
-        if (compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            outfile << " " << main_decode_dict_wildcards.size();
-        }
-
-        outfile << endl;
-
-        // Write words
-        for (const auto& word : main_decode_dict_words) {
-            outfile << word << endl;
-        }
-
-        // Write phrases if mode includes them
-        if (compression_mode == CompressionMode::WITH_PHRASES ||
-            compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            for (const auto& phrase : main_decode_dict_phrases) {
-                for (size_t i = 0; i < phrase.size(); ++i) {
-                    if (i > 0) outfile << " ";
-                    outfile << phrase[i];
-                }
-                outfile << endl;
-            }
-        }
-
-        // Write wildcard patterns if mode includes them
-        if (compression_mode == CompressionMode::WITH_WILDCARD_PHRASES) {
-            for (const auto& wildcard : main_decode_dict_wildcards) {
-                for (size_t i = 0; i < wildcard.size(); ++i) {
-                    if (i > 0) outfile << " ";
-                    outfile << wildcard[i];
-                }
-                outfile << endl;
-            }
-        }
-
-        return outfile.good();
-    }
-    #endif
 
     // Build local dictionary for rare words
     void build_local_dictionary(const vector<string>& rare_words) {
@@ -838,6 +673,7 @@ private:
         while ((1ULL << local_max_bit_length) < local_decode_dict.size()) {
             local_max_bit_length++;
         }
+        //local_max_bit_length = 32;
     }
 
     // Detect common phrases in the text
@@ -883,7 +719,7 @@ private:
         }
     }
 
-// Finds phrases in the tokenized text and returns tokenized result with phrases
+    // Finds phrases in the tokenized text and returns tokenized result with phrases
     vector<Token> tokenize_with_phrases(const vector<string>& word_tokens) {
         vector<Token> result;
 
@@ -1217,6 +1053,7 @@ public:
         while ((1ULL << main_max_bit_length) < total_main_entries) {
             main_max_bit_length++;
         }
+        //main_max_bit_length = 32;
 
         // Step 6: Identify rare words not in main dictionary
         unordered_set<string> rare_words_set;
@@ -1290,17 +1127,6 @@ public:
         writer.write_bits(main_max_bit_length, 8);
         writer.write_bits(local_max_bit_length, 8);
         writer.write_bits(local_decode_dict.size(), 32);
-
-        #if 0
-        // debug
-        writer.flush();
-        const auto& buffer = writer.get_buffer();
-        cout << "DEBUG: First 8 bytes written: ";
-        for(int i = 0; i < min(8, (int)buffer.size()); i++) {
-            cout << (int)buffer[i] << " ";
-        }
-        cout << endl;
-        #endif
 
         // Write local dictionary
         for (const auto& word : local_decode_dict) {
@@ -1381,13 +1207,6 @@ public:
             }
         }
 
-#if 0
-        // Write to output file
-        if (!writer.write_to_file(output_file)) {
-            cerr << "Error writing to output file: " << output_file << endl;
-            return false;
-        }
-#else
         // Get the compressed data
         writer.flush();
         const vector<uint8_t>& compressed_data = writer.get_buffer();
@@ -1400,27 +1219,21 @@ public:
         }
 
         cout << "LZMA compressed file written to: " << xz_output_file << endl;
-#endif
 
         // Print compression statistics
         ifstream original(input_file, ios::binary | ios::ate);
         size_t original_size = original.tellg();
         original.close();
 
-#if 0
-        ifstream compressed(output_file, ios::binary | ios::ate);
-        size_t compressed_size = compressed.tellg();
-        compressed.close();
-#else
         //string xz_output_file = output_file + ".xz";
         ifstream compressed(xz_output_file, ios::binary | ios::ate);
         size_t compressed_size = compressed.tellg();
         compressed.close();
-#endif
+
         cout << "Compression completed successfully!" << endl;
-        cout << "Original size: " << original_size << " bytes" << endl;
-        cout << "Compressed size: " << compressed_size << " bytes" << endl;
-        cout << "Compression ratio: " << (double)compressed_size / original_size << endl;
+        cout << "Original size: " << (double)original_size / 1024 << " Kbytes" << endl;
+        cout << "Compressed size: " << (double)compressed_size / 1024<< " Kbytes" << endl;
+        cout << "Compression ratio: " << (double)original_size  / compressed_size << endl;
         cout << "Space saved: " << (1.0 - (double)compressed_size / original_size) * 100 << "%" << endl;
 
         return true;
@@ -1434,34 +1247,14 @@ public:
             return false;
         }
 
-#if 0
-        // Step 2: Read compressed file
-        ifstream infile(input_file, ios::binary);
-        if (!infile) {
-            cerr << "Error opening input file: " << input_file << endl;
-            return false;
-        }
-
-        vector<uint8_t> buffer((istreambuf_iterator<char>(infile)), istreambuf_iterator<char>());
-        infile.close();
-#else
         // Step 2: Decompress LZMA file first
         vector<uint8_t> buffer;
         if (!decompress_with_lzma(input_file, buffer)) {
             cerr << "Error decompressing LZMA file" << endl;
             return false;
         }
-#endif
-        BitReader reader(buffer);
 
-        #if 0
-        // debug BEFORE reading
-        cout << "DEBUG: First 8 bytes in file: ";
-        for(int i = 0; i < min(8, (int)buffer.size()); i++) {
-            cout << (int)buffer[i] << " ";
-        }
-        cout << endl;
-        #endif
+        BitReader reader(buffer);
 
         // Step 3: Read header information
         compression_mode = static_cast<CompressionMode>(reader.read_bits(8));
@@ -1470,7 +1263,6 @@ public:
         uint32_t local_dict_size = reader.read_bits(32);
 
         cout << "Decompressing with mode: " << mode_to_string(compression_mode) << endl;
-        //cout << "Compression mode integer value: " << static_cast<int>(compression_mode) << endl;
 
         // Step 4: Read local dictionary
         local_decode_dict.clear();
