@@ -1,0 +1,35 @@
+# -*- fill-column: 76; -*-
+#+TITLE: Network Authentication using HMAC in eBPF
+#+OPTIONS: ^:nil
+
+This repository contains research and implementation of Internet Network Authentication
+using HMAC and SHA256 hash algorithms in eBPF.
+
+The implementation follows the framework of the XDP-Project
+https://github.com/xdp-project/xdp-tutorial
+ 
+It follows the tutorial that guides to effectively write programs for the eXpress Data Path (XDP)
+system in the Linux kernel, which offers high-performance programmable
+packet processing integrated with the kernel.
+
+* Introduction
+
+XDP is a part of the upstream Linux kernel, and enables users to install
+packet processing programs into the kernel, that will be executed for each
+arriving packet, before the kernel does any other processing on the data.
+The programs are written in restricted C, and compiled into the eBPF byte
+code format that is executed and JIT-compiled in the kernel, after being
+verified for safety. This approach offers great flexibility and high
+performance, and integrates well with the rest of the system. For a general
+introduction to XDP, read [[https://github.com/xdp-project/xdp-paper/blob/master/xdp-the-express-data-path.pdf][the academic paper (pdf)]], or the [[https://cilium.readthedocs.io/en/latest/bpf/][Cilium BPF
+reference guide]].
+
+* First step: Setup dependencies
+
+Before you build this code, you will need to
+install a few dependencies on your system. These are described in
+[[file:setup_dependencies.org]].
+
+* Second step: 
+After cloning the repo, change the directory Network Authentication to Authentication (any one word)
+and then run configure and build the code. 
