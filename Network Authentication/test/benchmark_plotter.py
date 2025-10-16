@@ -82,7 +82,7 @@ class BenchmarkPlotter:
         return np.array(data)
     
     def plot_bandwidth_comparison(self) -> plt.Figure:
-        """Create bandwidth comparison plot with three phases using log scale."""
+        """Create bandwidth comparison plot with three phases using log scale and error bars."""
         fig, ax = plt.subplots(figsize=(14, 8))
         
         # Extract data for all three phases
@@ -90,33 +90,44 @@ class BenchmarkPlotter:
         ebpf_auth_bw = self.extract_data_arrays('ebpf_auth', 'bandwidth')
         kernel_auth_bw = self.extract_data_arrays('kernel_auth', 'bandwidth')
         
-        # Create bar positions with log scale on x-axis
-        x = np.arange(len(self.packet_sizes))
-        width = 0.25
+        # Extract standard deviations
+        no_auth_std = self.extract_data_arrays('no_auth', 'bandwidth_std')
+        ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'bandwidth_std')
+        kernel_auth_std = self.extract_data_arrays('kernel_auth', 'bandwidth_std')
         
-        # Create bars for three phases
-        bars1 = ax.bar(x - width, no_auth_bw, width, 
+        # Convert packet sizes to log2 for equal spacing
+        x_positions = np.arange(len(self.packet_sizes))
+        width = 0.20
+        
+        # Create bars for three phases with error bars
+        bars1 = ax.bar(x_positions - width, no_auth_bw, width,
+                      yerr=no_auth_std,
                       label='No Authentication', 
                       color=self.colors['no_auth'],
-                      alpha=0.8, edgecolor='black', linewidth=0.5)
+                      alpha=0.8, edgecolor='black', linewidth=0.5,
+                      capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'pink'})
         
-        bars2 = ax.bar(x, ebpf_auth_bw, width,
+        bars2 = ax.bar(x_positions, ebpf_auth_bw, width,
+                      yerr=ebpf_auth_std,
                       label='eBPF SHA-256 Auth',
                       color=self.colors['ebpf_auth'],
-                      alpha=0.8, edgecolor='black', linewidth=0.5)
+                      alpha=0.8, edgecolor='black', linewidth=0.5,
+                      capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'pink'})
         
-        bars3 = ax.bar(x + width, kernel_auth_bw, width,
+        bars3 = ax.bar(x_positions + width, kernel_auth_bw, width,
+                      yerr=kernel_auth_std,
                       label='Kernel Authentication',
                       color=self.colors['kernel_auth'],
-                      alpha=0.8, edgecolor='black', linewidth=0.5)
+                      alpha=0.8, edgecolor='black', linewidth=0.5,
+                      capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'pink'})
         
         # Customize plot
         ax.set_xlabel('Packet Size (bytes)', fontweight='bold')
         ax.set_ylabel('Bandwidth (Mbps)', fontweight='bold')
         ax.set_title('Bandwidth Vs Packet Size', fontweight='bold', pad=20)
         
-        # Set x-axis labels with log-like spacing
-        ax.set_xticks(x)
+        # Set x-axis labels with logarithmic spacing
+        ax.set_xticks(x_positions)
         ax.set_xticklabels([str(size) for size in self.packet_sizes])
         
         # Add legend
@@ -129,6 +140,194 @@ class BenchmarkPlotter:
         # Set y-axis to start from 0
         ax.set_ylim(bottom=0)
         
+        plt.tight_layout()
+        return fig
+    
+    def plot_rtt_comparison2(self) -> plt.Figure:
+        """Create RTT comparison plot with three phases using log scale and error bars."""
+        fig, ax = plt.subplots(figsize=(14, 8))
+        
+        # Extract data for all three phases
+        no_auth_rtt = self.extract_data_arrays('no_auth', 'rtt')
+        ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt')
+        kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt')
+        
+        # Extract standard deviations
+        no_auth_std = self.extract_data_arrays('no_auth', 'rtt_std')
+        ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'rtt_std')
+        kernel_auth_std = self.extract_data_arrays('kernel_auth', 'rtt_std')
+        
+        # Convert packet sizes to log2 for equal spacing
+        x_positions = np.arange(len(self.packet_sizes))
+        width = 0.20
+        
+        # Create bars for three phases with error bars
+        bars1 = ax.bar(x_positions - width, no_auth_rtt, width,
+                      yerr=no_auth_std,
+                      label='No Authentication', 
+                      color=self.colors['no_auth'],
+                      alpha=0.8, edgecolor='black', linewidth=0.5,
+                      capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'pink'})
+        
+        bars2 = ax.bar(x_positions, ebpf_auth_rtt, width,
+                      yerr=ebpf_auth_std,
+                      label='eBPF SHA-256 Auth',
+                      color=self.colors['ebpf_auth'],
+                      alpha=0.8, edgecolor='black', linewidth=0.5,
+                      capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'pink'})
+        
+        bars3 = ax.bar(x_positions + width, kernel_auth_rtt, width,
+                      yerr=kernel_auth_std,
+                      label='Kernel Authentication',
+                      color=self.colors['kernel_auth'],
+                      alpha=0.8, edgecolor='black', linewidth=0.5,
+                      capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'pink'})
+        
+        # Customize plot
+        ax.set_xlabel('Packet Size (bytes)', fontweight='bold')
+        ax.set_ylabel('Round Trip Time (ms)', fontweight='bold')
+        ax.set_title('Round Trip Time Vs Packet Size', fontweight='bold', pad=20)
+        
+        # Set x-axis labels with logarithmic spacing
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels([str(size) for size in self.packet_sizes])
+        
+        # Add legend
+        ax.legend(loc='upper left', framealpha=0.9)
+        
+        # Add grid
+        ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
+        ax.set_axisbelow(True)
+        
+        # Set y-axis to start from 0
+        ax.set_ylim(bottom=0)
+        
+        plt.tight_layout()
+        return fig
+
+    def plot_rtt_comparison(self) -> plt.Figure:
+        """Create RTT comparison plot for three phases with log x-scale but clean numeric labels."""
+        fig, ax = plt.subplots(figsize=(14, 8))
+
+        # Extract RTT data
+        no_auth_rtt = self.extract_data_arrays('no_auth', 'rtt')
+        ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt')
+        kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt')
+
+        # Extract standard deviations (optional)
+        no_auth_std = self.extract_data_arrays('no_auth', 'rtt_std')
+        ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'rtt_std')
+        kernel_auth_std = self.extract_data_arrays('kernel_auth', 'rtt_std')
+
+        # X labels
+        x_labels = [str(size) for size in self.packet_sizes]
+        
+        """
+        # Plot lines with darker pink error bars
+        ax.errorbar(self.packet_sizes, no_auth_rtt, yerr=no_auth_std,
+                    fmt='o-', color='#4169E1', ecolor='#C71585',
+                    elinewidth=1.5, capsize=5, linewidth=2.5, markersize=8,
+                    label='No Authentication')
+
+        ax.errorbar(self.packet_sizes, ebpf_auth_rtt, yerr=ebpf_auth_std,
+                    fmt='s-', color='#DC143C', ecolor='#C71585',
+                    elinewidth=1.5, capsize=5, linewidth=2.5, markersize=8,
+                    label='eBPF SHA-256 Auth')
+
+        ax.errorbar(self.packet_sizes, kernel_auth_rtt, yerr=kernel_auth_std,
+                    fmt='^-', color='#FF8C00', ecolor='#C71585',
+                    elinewidth=1.5, capsize=5, linewidth=2.5, markersize=8,
+                    label='Kernel Authentication')
+        """
+        # Line plot for RTT
+        ax.plot(self.packet_sizes, no_auth_rtt, 'o-', 
+               linewidth=2.5, markersize=8, 
+               label='No Authentication', 
+               color='#4169E1', alpha=0.8)
+        
+        ax.plot(self.packet_sizes, ebpf_auth_rtt, 's-', 
+               linewidth=2.5, markersize=8,
+               label='eBPF SHA-256 Auth', 
+               color='#DC143C', alpha=0.8)
+        
+        ax.plot(self.packet_sizes, kernel_auth_rtt, '^-',
+               linewidth=2.5, markersize=8,
+               label='Kernel Authentication',
+               color='#FF8C00', alpha=0.8)
+
+        # Customize plot
+        ax.set_xlabel('Packet Size (bytes)', fontweight='bold')
+        ax.set_ylabel('Round Trip Time (ms)', fontweight='bold')
+        ax.set_title('Round Trip Time Vs Packet Size', fontweight='bold', pad=20)
+
+        # Logarithmic X-scale, but pretty labels
+        ax.set_xscale('log')
+        ax.set_xticks(self.packet_sizes)
+        ax.set_xticklabels(x_labels)
+
+        # Add legend
+        ax.legend(loc='best', framealpha=0.9)
+
+        # Grid and formatting
+        ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        ax.set_ylim(bottom=0)
+
+        plt.tight_layout()
+        return fig
+
+    '''
+    def plot_rtt_comparison(self) -> plt.Figure:
+        """Create RTT comparison plot for three phases."""
+        fig, ax = plt.subplots(figsize=(14, 8))
+
+        # Extract RTT data for all three phases
+        no_auth_rtt = self.extract_data_arrays('no_auth', 'rtt')
+        ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt')
+        kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt')
+
+        # Extract standard deviations (optional)
+        no_auth_std = self.extract_data_arrays('no_auth', 'rtt_std')
+        ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'rtt_std')
+        kernel_auth_std = self.extract_data_arrays('kernel_auth', 'rtt_std')
+
+        # X positions
+        x_positions = np.arange(len(self.packet_sizes))
+        x_labels = [str(size) for size in self.packet_sizes]
+
+        # Plot with error bars (darker pink)
+        ax.errorbar(self.packet_sizes, no_auth_rtt, yerr=no_auth_std,
+                    fmt='o-', color='#4169E1', ecolor='#C71585',
+                    elinewidth=1.5, capsize=5, linewidth=2.5, markersize=8,
+                    label='No Authentication')
+
+        ax.errorbar(self.packet_sizes, ebpf_auth_rtt, yerr=ebpf_auth_std,
+                    fmt='s-', color='#DC143C', ecolor='#C71585',
+                    elinewidth=1.5, capsize=5, linewidth=2.5, markersize=8,
+                    label='eBPF SHA-256 Auth')
+
+        ax.errorbar(self.packet_sizes, kernel_auth_rtt, yerr=kernel_auth_std,
+                    fmt='^-', color='#FF8C00', ecolor='#C71585',
+                    elinewidth=1.5, capsize=5, linewidth=2.5, markersize=8,
+                    label='Kernel Authentication')
+
+        # Customize plot
+        ax.set_xlabel('Packet Size (bytes)', fontweight='bold')
+        ax.set_ylabel('Round Trip Time (ms)', fontweight='bold')
+        ax.set_title('Round Trip Time Vs Packet Size', fontweight='bold', pad=20)
+
+        #Set clean x-axis labels without log scale
+        ax.set_xticks(self.packet_sizes)
+        ax.set_xticklabels(x_labels)
+
+        # Add legend
+        ax.legend(loc='best', framealpha=0.9)
+
+        # Add grid
+        ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        ax.set_ylim(bottom=0)
+
         plt.tight_layout()
         return fig
     
@@ -163,10 +362,10 @@ class BenchmarkPlotter:
         ax.set_title('Round Trip Time Vs Packet Size', fontweight='bold', pad=20)
         
         # Set x-axis
-        if max(self.packet_sizes) / min(self.packet_sizes) > 100:
-            ax.set_xscale('log')
-            ax.set_xticks(self.packet_sizes)
-            ax.set_xticklabels([str(size) for size in self.packet_sizes])
+        # if max(self.packet_sizes) / min(self.packet_sizes) > 100:
+        ax.set_xscale('log')
+        ax.set_xticks(self.packet_sizes)
+        ax.set_xticklabels([str(size) for size in self.packet_sizes])
         
         # Add legend
         ax.legend(loc='best', framealpha=0.9)
@@ -177,6 +376,7 @@ class BenchmarkPlotter:
         
         plt.tight_layout()
         return fig
+    '''
     
     def plot_performance_impact(self) -> plt.Figure:
         """Create performance impact analysis plot comparing all three phases with log scale."""
@@ -274,6 +474,9 @@ class BenchmarkPlotter:
         fig2 = self.plot_rtt_comparison()
         fig2.savefig(output_path / "rtt_comparison.png", dpi=300, bbox_inches='tight')
         plt.close(fig2)
+        fig3 = self.plot_rtt_comparison2()
+        fig3.savefig(output_path / "rtt_comparison2.png", dpi=300, bbox_inches='tight')
+        plt.close(fig3)
         
         # Create performance impact analysis
         print("  Creating performance impact analysis...")
