@@ -30,7 +30,7 @@ class UDPBenchmarkHybrid:
         self.duration = duration
         
         # Packet sizes to test (bytes)
-        self.packet_sizes = [128, 256, 512, 1024, 2048, 4096, 8192]
+        self.packet_sizes = [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65507] #65536]
         
         # Results storage
         self.results = {
