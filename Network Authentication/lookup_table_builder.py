@@ -132,13 +132,138 @@ class LookupTableBuilder:
             print(f"Warning: Could not clear table: {e}")
             return False
     
-    def build_lookup_table(self, prefix_count: int = 1000, clear_first: bool = True) -> None:
-        """Build the complete lookup table."""
-        print(f"🏗️  Building lookup table with {prefix_count} prefixes...")
+    def save_prefixes_to_file(self, filename: str, prefix_count: int = 1000) -> None:
+        """Generate and save prefixes to a file without adding to lookup table."""
+        print(f"Generating {prefix_count} prefixes with data center distribution...")
+        prefixes = self.generate_realistic_prefixes(prefix_count)
+        
+        print(f"Saving prefixes to {filename}...")
+        try:
+            with open(filename, 'w') as f:
+                f.write("# eBPF Authentication Lookup Table Prefixes\n")
+                f.write("# Format: IP_ADDRESS/PREFIX_LENGTH HASH_KEY\n")
+                f.write(f"# Generated {len(prefixes)} prefixes\n\n")
+                
+                for ip_address, prefix_len in prefixes:
+                    hash_key = self.generate_random_key()
+                    f.write(f"{ip_address}/{prefix_len} {hash_key}\n")
+            
+            print(f"Successfully saved {len(prefixes)} prefixes to {filename}")
+            
+            # Print distribution summary
+            print(f"\nPrefix distribution:")
+            dist_count = {}
+            for _, prefix_len in prefixes:
+                key = f"/{prefix_len}"
+                dist_count[key] = dist_count.get(key, 0) + 1
+            
+            for prefix_len, count in sorted(dist_count.items()):
+                percentage = (count / len(prefixes)) * 100
+                print(f"  {prefix_len:>3}: {count:>4} prefixes ({percentage:>5.1f}%)")
+        
+        except Exception as e:
+            print(f"Error saving prefixes to file: {e}")
+            sys.exit(1)
+    
+    def load_prefixes_from_file(self, filename: str) -> List[Tuple[str, int, str]]:
+        """Load prefixes from a file."""
+        prefixes = []
+        try:
+            with open(filename, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    parts = line.split()
+                    if len(parts) < 2:
+                        print(f"Warning: Skipping invalid line: {line}")
+                        continue
+                    
+                    prefix = parts[0]  # e.g., "10.0.0.0/24"
+                    hash_key = parts[1]
+                    
+                    # Parse prefix to extract IP and prefix length
+                    try:
+                        ip_part, prefix_len_str = prefix.split('/')
+                        prefix_len = int(prefix_len_str)
+                        prefixes.append((ip_part, prefix_len, hash_key))
+                    except ValueError:
+                        print(f"Warning: Skipping invalid prefix: {prefix}")
+                        continue
+            
+            print(f"Loaded {len(prefixes)} prefixes from {filename}")
+            return prefixes
+        
+        except FileNotFoundError:
+            print(f"Error: File {filename} not found")
+            return []
+        except Exception as e:
+            print(f"Error loading prefixes from file: {e}")
+            return []
+    
+    def build_lookup_table_from_file(self, filename: str, clear_first: bool = True) -> None:
+        """Build the lookup table from a prefix file."""
+        print(f"Building lookup table from {filename}...")
         print(f"User program: {self.user_program}")
         
         if not self.check_user_program():
-            print(f"❌ Error: Cannot execute user program at {self.user_program}")
+            print(f"Error: Cannot execute user program at {self.user_program}")
+            print("Please ensure:")
+            print("1. The path is correct")
+            print("2. The program is compiled and executable")
+            print("3. You have necessary permissions (may need sudo)")
+            sys.exit(1)
+        
+        if clear_first:
+            self.clear_table()
+        
+        # Load prefixes from file
+        prefixes = self.load_prefixes_from_file(filename)
+        
+        if not prefixes:
+            print("No prefixes to add")
+            return
+        
+        print(f"\nPrefix distribution:")
+        dist_count = {}
+        for _, prefix_len, _ in prefixes:
+            key = f"/{prefix_len}"
+            dist_count[key] = dist_count.get(key, 0) + 1
+        
+        for prefix_len, count in sorted(dist_count.items()):
+            percentage = (count / len(prefixes)) * 100
+            print(f"  {prefix_len:>3}: {count:>4} prefixes ({percentage:>5.1f}%)")
+        
+        # Add prefixes to table
+        print(f"\nAdding prefixes to lookup table...")
+        success_count = 0
+        
+        for i, (ip_address, prefix_len, hash_key) in enumerate(prefixes, 1):
+            if self.add_prefix_to_table(ip_address, prefix_len, hash_key):
+                success_count += 1
+                if i % 50 == 0:
+                    print(f"    Added {i}/{len(prefixes)} prefixes...")
+            else:
+                print(f"    Failed to add {ip_address}/{prefix_len}")
+            
+            # Small delay to avoid overwhelming the program
+            time.sleep(0.01)
+        
+        print(f"\nLookup table built successfully!")
+        print(f"Added: {success_count}/{len(prefixes)} prefixes")
+        
+        if success_count < len(prefixes):
+            print(f"Warning: {len(prefixes) - success_count} prefixes failed to add")
+    
+    def build_lookup_table(self, prefix_count: int = 1000, clear_first: bool = True) -> None:
+        """Build the complete lookup table with generated prefixes."""
+        print(f"Building lookup table with {prefix_count} prefixes...")
+        print(f"User program: {self.user_program}")
+        
+        if not self.check_user_program():
+            print(f"Error: Cannot execute user program at {self.user_program}")
             print("Please ensure:")
             print("1. The path is correct")
             print("2. The program is compiled and executable")
@@ -149,10 +274,10 @@ class LookupTableBuilder:
             self.clear_table()
         
         # Generate prefixes
-        print(f"\n📊 Generating {prefix_count} prefixes with data center distribution...")
+        print(f"\nGenerating {prefix_count} prefixes with data center distribution...")
         prefixes = self.generate_realistic_prefixes(prefix_count)
         
-        print(f"\n📝 Prefix distribution summary:")
+        print(f"\nPrefix distribution summary:")
         dist_count = {}
         for _, prefix_len in prefixes:
             key = f"/{prefix_len}"
@@ -163,7 +288,7 @@ class LookupTableBuilder:
             print(f"  {prefix_len:>3}: {count:>4} prefixes ({percentage:>5.1f}%)")
         
         # Add prefixes to table
-        print(f"\n🔧 Adding prefixes to lookup table...")
+        print(f"\nAdding prefixes to lookup table...")
         success_count = 0
         
         for i, (ip_address, prefix_len) in enumerate(prefixes, 1):
@@ -171,19 +296,19 @@ class LookupTableBuilder:
             
             if self.add_prefix_to_table(ip_address, prefix_len, hash_key):
                 success_count += 1
-                if i % 50 == 0:  # Progress update every 50 prefixes
-                    print(f"    ✅ Added {i}/{len(prefixes)} prefixes...")
+                if i % 50 == 0:
+                    print(f"    Added {i}/{len(prefixes)} prefixes...")
             else:
-                print(f"    ❌ Failed to add {ip_address}/{prefix_len}")
+                print(f"    Failed to add {ip_address}/{prefix_len}")
             
             # Small delay to avoid overwhelming the program
             time.sleep(0.01)
         
-        print(f"\n🎉 Lookup table built successfully!")
-        print(f"✅ Added: {success_count}/{len(prefixes)} prefixes")
+        print(f"\nLookup table built successfully!")
+        print(f"Added: {success_count}/{len(prefixes)} prefixes")
         
         if success_count < len(prefixes):
-            print(f"⚠️  Warning: {len(prefixes) - success_count} prefixes failed to add")
+            print(f"Warning: {len(prefixes) - success_count} prefixes failed to add")
     
     def show_table_stats(self) -> None:
         """Show current lookup table statistics."""
@@ -191,27 +316,12 @@ class LookupTableBuilder:
             result = subprocess.run([self.user_program, "show"], 
                                   capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                print("\n📊 Current lookup table contents:")
+                print("\nCurrent lookup table contents:")
                 print(result.stdout)
             else:
                 print("Could not retrieve table statistics")
         except Exception as e:
             print(f"Error retrieving table stats: {e}")
-    
-    def generate_test_config(self, filename: str = "test_prefixes.txt") -> None:
-        """Generate a test configuration file with the prefixes."""
-        prefixes = self.generate_realistic_prefixes(1000)
-        
-        with open(filename, 'w') as f:
-            f.write("# eBPF Authentication Test Prefixes\n")
-            f.write("# Format: IP_ADDRESS/PREFIX_LENGTH HASH_KEY\n")
-            f.write(f"# Generated {len(prefixes)} prefixes\n\n")
-            
-            for ip_address, prefix_len in prefixes:
-                hash_key = self.generate_random_key()
-                f.write(f"{ip_address}/{prefix_len} {hash_key}\n")
-        
-        print(f"✅ Test configuration saved to: {filename}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -220,21 +330,24 @@ def main():
         epilog="""
 Examples:
   python lookup_table_builder.py --build 1000
+  python lookup_table_builder.py --save-prefixes my_prefixes.txt
+  python lookup_table_builder.py --build-from-file my_prefixes.txt
   python lookup_table_builder.py --build 500 --user-program ./my_xdp_program  
-  python lookup_table_builder.py --generate-config test_config.txt
   python lookup_table_builder.py --show-stats
         """
     )
     
     parser.add_argument("--build", "-b", type=int, metavar="COUNT",
-                       help="Build lookup table with COUNT prefixes (default: 1000)")
+                       help="Build lookup table with COUNT generated prefixes (default: 1000)")
+    parser.add_argument("--save-prefixes", "-s", metavar="FILE",
+                       help="Generate and save prefixes to FILE without building table")
+    parser.add_argument("--build-from-file", "-f", metavar="FILE",
+                       help="Build lookup table from a prefix file")
     parser.add_argument("--user-program", "-u", default="/tmp/xdp_bpf_user",
                        help="Path to the user program (default: /tmp/xdp_bpf_user)")
     parser.add_argument("--no-clear", action="store_true",
                        help="Don't clear existing table before building")
-    parser.add_argument("--generate-config", "-g", metavar="FILE",
-                       help="Generate test configuration file")
-    parser.add_argument("--show-stats", "-s", action="store_true",
+    parser.add_argument("--show-stats", action="store_true",
                        help="Show current lookup table statistics")
     
     args = parser.parse_args()
@@ -243,12 +356,16 @@ Examples:
     
     if args.show_stats:
         builder.show_table_stats()
-    elif args.generate_config:
-        builder.generate_test_config(args.generate_config)
+    elif args.save_prefixes:
+        # Generate 1000 prefixes by default if --build not specified
+        count = args.build if args.build else 1000
+        builder.save_prefixes_to_file(args.save_prefixes, count)
+    elif args.build_from_file:
+        builder.build_lookup_table_from_file(args.build_from_file, not args.no_clear)
+        builder.show_table_stats()
     elif args.build is not None:
         builder.build_lookup_table(args.build, not args.no_clear)
-        if args.build > 0:
-            builder.show_table_stats()
+        builder.show_table_stats()
     else:
         # Default action
         builder.build_lookup_table(1000, True)
