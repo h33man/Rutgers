@@ -103,7 +103,6 @@ struct {
         WORD m[64];
     });
 } sha256_temp_map SEC(".maps");
-#endif
 
 // Map for kfunc hash computation
 struct {
@@ -125,6 +124,7 @@ struct {
     });
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } config_map SEC(".maps");
+#endif
 
 /****************************** HELPER FUNCTIONS ******************************/
 

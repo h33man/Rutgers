@@ -24,6 +24,15 @@
 *********************************************************************/
 
 /*************************** HEADER FILES ***************************/
+#include "sha256.h"
+
+#ifdef BPF_DEBUG
+    __u8 debug = 1;
+#else
+    __u8 debug = 0;
+#endif
+
+#if 0
 /* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/bpf.h>
 #include <linux/in.h>
@@ -43,7 +52,6 @@
 #include "../common/xdp_stats_kern_user.h"
 #include "../common/xdp_stats_kern.h"
 
-#include "sha256.h"
 #include "sha256_kfunc.h"
 
 /****************************** MACROS ******************************/
@@ -63,12 +71,6 @@
 #define ETHERNET_HEADER_SIZE 14
 
 #define ntohs(x) ((((x) >> 8) & 0xff) | (((x) & 0xff) << 8))
-
-#ifdef BPF_DEBUG
-    __u8 debug = 1;
-#else
-    __u8 debug = 0;
-#endif
 
 /**************************** VARIABLES *****************************/
 static const WORD k[64] = {
@@ -149,20 +151,6 @@ struct {
     });
 } sha256_temp_map SEC(".maps");
 
-// Map for verification to avoid stack overflow
-// Extended with use_kfunc flag for runtime selection
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, struct {
-        BYTE extracted_hash[SHA256_BLOCK_SIZE];
-        BYTE computed_hash[SHA256_BLOCK_SIZE];
-        struct iphdr original_header;
-        uint8_t headers_buffer[ETHERNET_HEADER_SIZE + 60];
-    });
-} verify_map SEC(".maps");
-
 // Map for kfunc hash computation
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -183,7 +171,23 @@ struct {
     });
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } config_map SEC(".maps");
+#endif
 
+// Map for verification to avoid stack overflow
+// Extended with use_kfunc flag for runtime selection
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct {
+        BYTE extracted_hash[SHA256_BLOCK_SIZE];
+        BYTE computed_hash[SHA256_BLOCK_SIZE];
+        struct iphdr original_header;
+        uint8_t headers_buffer[ETHERNET_HEADER_SIZE + 60];
+    });
+} verify_map SEC(".maps");
+
+#if 0
 /****************************** CUSTOM SHA256 IMPLEMENTATION ******************************/
 
 static __always_inline int sha256_transform(const BYTE data[])
@@ -384,47 +388,6 @@ static __always_inline int sha256_final(BYTE hash[])
 
 /****************************** COMMON HELPER FUNCTIONS ******************************/
 
-#if 0
-// Function to print a hex dump of binary data
-void print_hex(const unsigned char *data, int len) {
-    if (len > 20) return;
-    for (int i = 0; i < len; i++)
-        bpf_printk("%02x\n", data[i++]);
-    bpf_printk("\n");
-}
-
-// Function to dump IP header details
-void dump_ip_header(const struct iphdr *ip_header) {
-    bpf_printk("\n=== IP HEADER DUMP ===\n");
-    bpf_printk("Version: %d\n", ip_header->version);
-    bpf_printk("Header Length: %d bytes\n", ip_header->ihl * 4);
-    bpf_printk("Type of Service: 0x%02x\n", ip_header->tos);
-    bpf_printk("Total Length: %d bytes\n", __builtin_bswap16(ip_header->tot_len));
-    bpf_printk("Identification: 0x%04x\n", __builtin_bswap16(ip_header->id));
-
-    // Handle fragmentation flags and offset
-    unsigned short frag = __builtin_bswap16(ip_header->frag_off);
-    bpf_printk("Fragment Offset: 0x%04x\n", frag);
-
-    bpf_printk("Time to Live: %d\n", ip_header->ttl);
-    bpf_printk("Protocol: %d", ip_header->protocol);
-    bpf_printk("Header Checksum: 0x%04x\n", __builtin_bswap16(ip_header->check));
-    bpf_printk("Source IP: 0x%04x\n", ip_header->saddr);
-    bpf_printk("Destination IP: 0x%04x\n", ip_header->daddr);
-    /*
-    // Print options if present
-    if (ip_header->ihl > 5) {
-        bpf_printk("IP Options Present: %d bytes of options\n", (ip_header->ihl - 5) * 4);
-        const unsigned char *options = (const unsigned char *)ip_header + 20;
-        size_t opt_len = (ip_header->ihl - 5) * 4;
-        bpf_printk("Options (hex): ");
-        print_hex(options, opt_len);
-    }
-    */
-    bpf_printk("=== END IP HEADER ===\n\n");
-}
-#endif
-
 /**
  * Lookup authentication key for source IP using LPM trie
  */
@@ -565,6 +528,7 @@ static __always_inline int compute_keyed_hash_from_map_dynamic(const BYTE *data,
 
     return 0;
 }
+#endif
 
 /****************************** HASH VERIFICATION AND COMPUTATION ******************************/
 
@@ -1143,3 +1107,5 @@ int xdp_pass_func(struct xdp_md *ctx)
 }
 
 char _license[] SEC("license") = "GPL";
+//__uint(xdp_flags, XDP_FLAGS_MULTI_BUFFER);
+
