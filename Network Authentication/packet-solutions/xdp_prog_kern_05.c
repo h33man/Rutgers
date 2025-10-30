@@ -1103,6 +1103,15 @@ out:
 SEC("xdp_pass")
 int xdp_pass_func(struct xdp_md *ctx)
 {
+    // TIMING: Calculate total latency for baseline measurement
+    __u64 start_time = bpf_ktime_get_ns();
+    artificial_latency_compute_ops();
+
+    __u64 end_time = bpf_ktime_get_ns();
+    __u64 total_latency = end_time - start_time;
+
+    bpf_printk("Latency in XDP: %d ns\n", total_latency);
+
     return XDP_PASS;
 }
 

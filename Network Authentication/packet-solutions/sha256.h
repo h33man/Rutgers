@@ -41,6 +41,7 @@
 #include "../common/xdp_stats_kern.h"
 
 #include "sha256_kfunc.h"
+#include "helpers.h"
 
 /**************************** DATA TYPES ****************************/
 typedef unsigned char BYTE;             // 8-bit byte
