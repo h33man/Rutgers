@@ -1103,14 +1103,24 @@ out:
 SEC("xdp_pass")
 int xdp_pass_func(struct xdp_md *ctx)
 {
+    // Get config to check use_kfunc flag
+    __u32 key = 0;
+    struct {
+        __u8 use_kfunc;
+    } *config_ctx;
+
+    config_ctx = bpf_map_lookup_elem(&config_map, &key);
+    if (!config_ctx)
+        return -1;
+
     // TIMING: Calculate total latency for baseline measurement
-    __u64 start_time = bpf_ktime_get_ns();
-    artificial_latency_compute_ops();
+    //__u64 start_time = bpf_ktime_get_ns();
+    artificial_latency_compute_ops(config_ctx->use_kfunc);
 
-    __u64 end_time = bpf_ktime_get_ns();
-    __u64 total_latency = end_time - start_time;
+    //__u64 end_time = bpf_ktime_get_ns();
+    //__u64 total_latency = end_time - start_time;
 
-    bpf_printk("Latency in XDP: %d ns\n", total_latency);
+    //bpf_printk("Latency in XDP: %d ns\n", total_latency);
 
     return XDP_PASS;
 }
