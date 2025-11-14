@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
 
-XDP_TARGETS  := xdp_prog_kern_02 tc_prog_kern_02 xdp_prog_kern_05 
+XDP_TARGETS  := tc_prog_kern_02 xdp_prog_kern_05 
 USER_TARGETS := xdp_prog_user xdp_bpf_user xdp_use_kfunc
 
 COMMON_DIR := ../common

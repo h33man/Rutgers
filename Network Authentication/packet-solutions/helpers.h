@@ -27,15 +27,21 @@ static __always_inline void artificial_latency_map_ops(struct __sk_buff *ctx)
 
 #else
 // Method 2: Computational intensive operations
-static __always_inline void artificial_latency_compute_ops(void)
+static __always_inline void artificial_latency_compute_ops(__u8 loop_count) //void)
 {
     __u64 start_time = bpf_ktime_get_ns();
 
     volatile __u64 result = 1;
     volatile __u64 multiplier = 1234567;
 
-    #pragma unroll
-    for (int i = 0; i < 1000; i++) {
+    //if (loop_count > 255) {
+    //	bpf_printk("Artificial latency: Wrong loop count %d\n", loop_count);
+    //	return;
+    //`}
+
+    //bpf_printk("Artificial latency: loop count %d\n", loop_count);
+    //#pragma unroll
+    for (int i = 0; i < 10 * loop_count; i++) {
         // Operations that create dependencies and can't be easily optimized
         result = (result * multiplier) & 0xFFFFFFFF;
         result = result ^ (result >> 16);

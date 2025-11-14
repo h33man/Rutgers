@@ -522,7 +522,8 @@ struct rtt_stats rtt_test_optimized(const char *src_ip_str, const char *dst_ip_s
         }
         
         /* Small delay between probes */
-        usleep(5000);  // 5ms
+        //usleep(5000);  // 5ms
+        usleep(10);  // 5ms
     }
     
     printf(" done\n");
@@ -536,7 +537,6 @@ struct rtt_stats rtt_test_optimized(const char *src_ip_str, const char *dst_ip_s
             }
         }
         stats.avg_rtt = sum / stats.successful;
-        stats.std_rtt = calculate_std_dev(rtt_samples, RTT_SAMPLES, stats.avg_rtt);
         
         /* Recalculate std dev using only successful samples */
         double sum_sq_diff = 0.0;
@@ -576,13 +576,13 @@ const char* get_timestamp(void) {
 /* Write results to JSON file with phase tagging */
 void write_json_results(const char *filename, const char *src_ip, const char *dst_ip,
                         int packet_size, int duration, struct benchmark_stats bw_stats,
-                        struct rtt_stats rtt_stats, const char *phase) {
+                        struct rtt_stats rtt_stats, const char *phase, int loop_count) {
     FILE *fp = fopen(filename, "r");
     int file_exists = (fp != NULL);
     if (fp) fclose(fp);
     
     if (!file_exists) {
-        /* Create new JSON structure with three phase objects */
+        /* Create new JSON structure with all phase objects */
         fp = fopen(filename, "w");
         if (!fp) {
             fprintf(stderr, "Warning: Could not create %s\n", filename);
@@ -592,7 +592,7 @@ void write_json_results(const char *filename, const char *src_ip, const char *ds
         fprintf(fp, "{\n");
         fprintf(fp, "  \"metadata\": {\n");
         fprintf(fp, "    \"timestamp\": \"%s\",\n", get_timestamp());
-        fprintf(fp, "    \"description\": \"UDP performance benchmark with sendmmsg and IP spoofing\",\n");
+        fprintf(fp, "    \"description\": \"UDP performance benchmark with multiple authentication methods and artificial delays\",\n");
         fprintf(fp, "    \"source_ip\": \"%s\",\n", src_ip);
         fprintf(fp, "    \"dest_ip\": \"%s\",\n", dst_ip);
         fprintf(fp, "    \"duration\": %d\n", duration);
@@ -600,7 +600,8 @@ void write_json_results(const char *filename, const char *src_ip, const char *ds
         fprintf(fp, "  \"results\": {\n");
         fprintf(fp, "    \"no_auth\": {\"bandwidth\": {}, \"bandwidth_std\": {}, \"rtt\": {}, \"rtt_std\": {}, \"rtt_min\": {}, \"rtt_max\": {}, \"packets_sent\": {}},\n");
         fprintf(fp, "    \"ebpf_auth\": {\"bandwidth\": {}, \"bandwidth_std\": {}, \"rtt\": {}, \"rtt_std\": {}, \"rtt_min\": {}, \"rtt_max\": {}, \"packets_sent\": {}},\n");
-        fprintf(fp, "    \"kernel_auth\": {\"bandwidth\": {}, \"bandwidth_std\": {}, \"rtt\": {}, \"rtt_std\": {}, \"rtt_min\": {}, \"rtt_max\": {}, \"packets_sent\": {}}\n");
+        fprintf(fp, "    \"kernel_auth\": {\"bandwidth\": {}, \"bandwidth_std\": {}, \"rtt\": {}, \"rtt_std\": {}, \"rtt_min\": {}, \"rtt_max\": {}, \"packets_sent\": {}},\n");
+        fprintf(fp, "    \"art_delay\": {}\n");
         fprintf(fp, "  }\n");
         fprintf(fp, "}\n");
         fclose(fp);
@@ -608,30 +609,74 @@ void write_json_results(const char *filename, const char *src_ip, const char *ds
     
     /* Use Python to properly update JSON */
     char python_cmd[4096];
-    snprintf(python_cmd, sizeof(python_cmd),
-        "python3 -c \"import json; "
-        "data = json.load(open('%s')); "
-        "data['results']['%s']['bandwidth']['%d'] = %.2f; "
-        "data['results']['%s']['bandwidth_std']['%d'] = %.2f; "
-        "data['results']['%s']['rtt']['%d'] = %.3f; "
-        "data['results']['%s']['rtt_std']['%d'] = %.3f; "
-        "data['results']['%s']['rtt_min']['%d'] = %.3f; "
-        "data['results']['%s']['rtt_max']['%d'] = %.3f; "
-        "data['results']['%s']['packets_sent']['%d'] = %lu; "
-        "json.dump(data, open('%s', 'w'), indent=2)\"",
-        filename,
-        phase, packet_size, bw_stats.bandwidth_mbps,
-        phase, packet_size, bw_stats.bandwidth_std,
-        phase, packet_size, rtt_stats.avg_rtt,
-        phase, packet_size, rtt_stats.std_rtt,
-        phase, packet_size, rtt_stats.min_rtt,
-        phase, packet_size, rtt_stats.max_rtt,
-        phase, packet_size, bw_stats.packets_sent,
-        filename);
+    
+    if (loop_count >= 0) {
+        /* For artificial delay, nest under loop count */
+        snprintf(python_cmd, sizeof(python_cmd),
+            "python3 -c \"\n"
+            "import json\n"
+            "data = json.load(open('%s'))\n"
+            "if 'art_delay' not in data['results']:\n"
+            "    data['results']['art_delay'] = {}\n"
+            "if '%d' not in data['results']['art_delay']:\n"
+            "    data['results']['art_delay']['%d'] = {\n"
+            "        'bandwidth': {},\n"
+            "        'bandwidth_std': {},\n"
+            "        'rtt': {},\n"
+            "        'rtt_std': {},\n"
+            "        'rtt_min': {},\n"
+            "        'rtt_max': {},\n"
+            "        'packets_sent': {}\n"
+            "    }\n"
+            "data['results']['art_delay']['%d']['bandwidth']['%d'] = %.2f\n"
+            "data['results']['art_delay']['%d']['bandwidth_std']['%d'] = %.2f\n"
+            "data['results']['art_delay']['%d']['rtt']['%d'] = %.3f\n"
+            "data['results']['art_delay']['%d']['rtt_std']['%d'] = %.3f\n"
+            "data['results']['art_delay']['%d']['rtt_min']['%d'] = %.3f\n"
+            "data['results']['art_delay']['%d']['rtt_max']['%d'] = %.3f\n"
+            "data['results']['art_delay']['%d']['packets_sent']['%d'] = %lu\n"
+            "json.dump(data, open('%s', 'w'), indent=2)\n"
+            "\"",
+            filename,
+            loop_count, loop_count,
+            loop_count, packet_size, bw_stats.bandwidth_mbps,
+            loop_count, packet_size, bw_stats.bandwidth_std,
+            loop_count, packet_size, rtt_stats.avg_rtt,
+            loop_count, packet_size, rtt_stats.std_rtt,
+            loop_count, packet_size, rtt_stats.min_rtt,
+            loop_count, packet_size, rtt_stats.max_rtt,
+            loop_count, packet_size, bw_stats.packets_sent,
+            filename);
+    } else {
+        /* Standard phase (no_auth, ebpf_auth, kernel_auth) */
+        snprintf(python_cmd, sizeof(python_cmd),
+            "python3 -c \"\n"
+            "import json\n"
+            "data = json.load(open('%s'))\n"
+            "data['results']['%s']['bandwidth']['%d'] = %.2f\n"
+            "data['results']['%s']['bandwidth_std']['%d'] = %.2f\n"
+            "data['results']['%s']['rtt']['%d'] = %.3f\n"
+            "data['results']['%s']['rtt_std']['%d'] = %.3f\n"
+            "data['results']['%s']['rtt_min']['%d'] = %.3f\n"
+            "data['results']['%s']['rtt_max']['%d'] = %.3f\n"
+            "data['results']['%s']['packets_sent']['%d'] = %lu\n"
+            "json.dump(data, open('%s', 'w'), indent=2)\n"
+            "\"",
+            filename,
+            phase, packet_size, bw_stats.bandwidth_mbps,
+            phase, packet_size, bw_stats.bandwidth_std,
+            phase, packet_size, rtt_stats.avg_rtt,
+            phase, packet_size, rtt_stats.std_rtt,
+            phase, packet_size, rtt_stats.min_rtt,
+            phase, packet_size, rtt_stats.max_rtt,
+            phase, packet_size, bw_stats.packets_sent,
+            filename);
+    }
     
     int ret = system(python_cmd);
     if (ret != 0) {
         fprintf(stderr, "Warning: Failed to update JSON results (is python3 installed?)\n");
+        fprintf(stderr, "Debug: Command was:\n%s\n", python_cmd);
     }
 }
 
@@ -644,14 +689,20 @@ void print_usage(const char *prog) {
     fprintf(stderr, "  -i INTERFACE    Network interface (default: eth0)\n");
     fprintf(stderr, "  -c CPU          Pin to CPU core\n");
     fprintf(stderr, "  -m MODE         Test mode: both, bandwidth, rtt (default: both)\n");
-    fprintf(stderr, "  -r RUNS         Number of runs for std dev (default: 3)\n");
     fprintf(stderr, "  -o OUTPUT       Output JSON file (default: udp_benchmark_results.json)\n");
-    fprintf(stderr, "  -a PHASE        Phase: no_auth, ebpf_auth, kernel_auth (default: no_auth)\n");
+    fprintf(stderr, "  -a PHASE [N]    Phase: no_auth, ebpf_auth, kernel_auth, art_delay N\n");
+    fprintf(stderr, "                  For art_delay, N is loop count (e.g., -a art_delay 100)\n");
     fprintf(stderr, "  -h              Show this help\n");
+    fprintf(stderr, "\nPhase Descriptions:\n");
+    fprintf(stderr, "  no_auth         - Baseline without authentication\n");
+    fprintf(stderr, "  ebpf_auth       - With eBPF SHA-256 authentication\n");
+    fprintf(stderr, "  kernel_auth     - With kernel-level authentication\n");
+    fprintf(stderr, "  art_delay N     - With artificial delay (N loops in eBPF)\n");
     fprintf(stderr, "\nExamples:\n");
     fprintf(stderr, "  sudo %s -d 192.168.1.100 -p 8192 -c 2 -a no_auth\n", prog);
     fprintf(stderr, "  sudo %s -d 192.168.1.100 -p 1024 -m rtt -a ebpf_auth\n", prog);
-    fprintf(stderr, "  sudo %s -d 192.168.1.100 -p 8192 -r 5 -o results.json\n", prog);
+    fprintf(stderr, "  sudo %s -d 192.168.1.100 -p 8192 -a art_delay 100\n", prog);
+    fprintf(stderr, "  sudo %s -d 192.168.1.100 -p 8192 -t 30 -o results.json\n", prog);
 }
 
 int main(int argc, char *argv[]) {
@@ -661,13 +712,13 @@ int main(int argc, char *argv[]) {
     char mode[16] = "both";
     char output_file[256] = "udp_benchmark_results.json";
     char phase[32] = "no_auth";
+    int loop_count = -1;  /* For art_delay phase */
     int packet_size = 8192;
     int duration = 10;
     int cpu_core = -1;
-    int num_runs = 3;
     
     int opt;
-    while ((opt = getopt(argc, argv, "s:d:p:t:i:c:m:r:o:a:h")) != -1) {
+    while ((opt = getopt(argc, argv, "s:d:p:t:i:c:m:o:a:h")) != -1) {
         switch (opt) {
             case 's':
                 strncpy(src_ip, optarg, INET_ADDRSTRLEN - 1);
@@ -690,16 +741,23 @@ int main(int argc, char *argv[]) {
             case 'm':
                 strncpy(mode, optarg, sizeof(mode) - 1);
                 break;
-            case 'r':
-                num_runs = atoi(optarg);
-                if (num_runs < 1) num_runs = 1;
-                if (num_runs > 10) num_runs = 10;
-                break;
             case 'o':
                 strncpy(output_file, optarg, sizeof(output_file) - 1);
                 break;
             case 'a':
+                /* Check if next argument exists and is "art_delay" */
                 strncpy(phase, optarg, sizeof(phase) - 1);
+                if (strcmp(phase, "art_delay") == 0) {
+                    /* Next argument should be the loop count */
+                    if (optind < argc) {
+                        loop_count = atoi(argv[optind]);
+                        optind++;  /* Skip the loop count argument */
+                    } else {
+                        fprintf(stderr, "Error: art_delay requires loop count argument\n");
+                        fprintf(stderr, "Usage: -a art_delay <loop_count>\n");
+                        return 1;
+                    }
+                }
                 break;
             case 'h':
                 print_usage(argv[0]);
@@ -721,11 +779,14 @@ int main(int argc, char *argv[]) {
     printf("  Source IP: %s\n", src_ip);
     printf("  Destination IP: %s\n", dst_ip);
     printf("  Packet size: %d bytes\n", packet_size);
-    printf("  Duration: %d seconds (per run)\n", duration);
+    printf("  Duration: %d seconds\n", duration);
     printf("  Mode: %s\n", mode);
-    printf("  Runs: %d\n", num_runs);
     printf("  Interface: %s\n", interface);
-    printf("  Phase: %s\n", phase);
+    printf("  Phase: %s", phase);
+    if (loop_count >= 0) {
+        printf(" (loop_count: %d)", loop_count);
+    }
+    printf("\n");
     printf("  Output file: %s\n", output_file);
     
     int mtu = get_mtu(interface);
@@ -747,7 +808,7 @@ int main(int argc, char *argv[]) {
     
     if (strcmp(mode, "bandwidth") == 0 || strcmp(mode, "both") == 0) {
         printf("\n--- Bandwidth Test ---\n");
-        bw_stats = bandwidth_test_sendmmsg(src_ip, dst_ip, packet_size, duration, mtu); // num_runs);
+        bw_stats = bandwidth_test_sendmmsg(src_ip, dst_ip, packet_size, duration, mtu);
         
         printf("\nBandwidth Results:\n");
         printf("  Average: %.2f ± %.2f Mbps (%.2f ± %.2f Gbps)\n", 
@@ -755,7 +816,7 @@ int main(int argc, char *argv[]) {
                bw_stats.bandwidth_mbps / 1000.0, bw_stats.bandwidth_std / 1000.0);
         printf("  Total packets sent: %lu\n", bw_stats.packets_sent);
         printf("  Total bytes sent: %lu\n", bw_stats.bytes_sent);
-        printf("  Total duration: %.2f seconds\n", bw_stats.duration);
+        printf("  Duration: %.2f seconds\n", bw_stats.duration);
     }
     
     if (strcmp(mode, "rtt") == 0 || strcmp(mode, "both") == 0) {
@@ -780,7 +841,7 @@ int main(int argc, char *argv[]) {
     
     /* Save results to JSON */
     write_json_results(output_file, src_ip, dst_ip, packet_size, duration, 
-                      bw_stats, rtt_stats, phase);
+                      bw_stats, rtt_stats, phase, loop_count);
     printf("\n✓ Results saved to: %s\n", output_file);
     
     return 0;

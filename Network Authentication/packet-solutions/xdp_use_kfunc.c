@@ -74,7 +74,8 @@ int main(int argc, char **argv)
     // Determine the use_kfunc value
     if (argc >= 3) {
         new_use_kfunc = atoi(argv[2]);
-        if (new_use_kfunc != 0 && new_use_kfunc != 1) {
+        //if (new_use_kfunc != 0 && new_use_kfunc != 1) {
+        if (new_use_kfunc > 255) {
             fprintf(stderr, "Error: use_kfunc must be 0 or 1\n");
             return 1;
         }
