@@ -9,12 +9,7 @@
 #include "sha256.h"
 #include "sha256_kfunc.h"
 
-#ifdef BPF_DEBUG
-    __u8 debug = 1;
-#else
-    __u8 debug = 0;
-#endif
-
+extern __u8 debug;
 
 /* Defines tc_stats_map instead of xdp_stats_map */
 struct {

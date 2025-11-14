@@ -29,7 +29,8 @@ static __always_inline void artificial_latency_map_ops(struct __sk_buff *ctx)
 // Method 2: Computational intensive operations
 static __always_inline void artificial_latency_compute_ops(__u8 loop_count) //void)
 {
-    __u64 start_time = bpf_ktime_get_ns();
+
+    //__u64 start_time = bpf_ktime_get_ns();
 
     volatile __u64 result = 1;
     volatile __u64 multiplier = 1234567;
@@ -41,6 +42,7 @@ static __always_inline void artificial_latency_compute_ops(__u8 loop_count) //vo
 
     //bpf_printk("Artificial latency: loop count %d\n", loop_count);
     //#pragma unroll
+    //for (int i = 0; i < 1000; i++) {
     for (int i = 0; i < 10 * loop_count; i++) {
         // Operations that create dependencies and can't be easily optimized
         result = (result * multiplier) & 0xFFFFFFFF;
@@ -49,10 +51,10 @@ static __always_inline void artificial_latency_compute_ops(__u8 loop_count) //vo
         multiplier = (multiplier + result) & 0xFFFFFFFF;
     }
 
-    __u64 end_time = bpf_ktime_get_ns();
-    __u64 total_latency = end_time - start_time;
+    //__u64 end_time = bpf_ktime_get_ns();
+    //__u64 total_latency = end_time - start_time;
 
-    bpf_printk("Artificial latency: %llu ns\n", total_latency);
+    //bpf_printk("Artificial latency: %llu ns\n", total_latency);
 }
 #endif
 #endif /*__HELPERS_H */

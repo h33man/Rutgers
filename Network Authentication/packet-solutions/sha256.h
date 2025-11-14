@@ -43,6 +43,12 @@
 #include "sha256_kfunc.h"
 #include "helpers.h"
 
+#ifdef BPF_DEBUG
+    __u8 debug = 1;
+#else
+    __u8 debug = 0;
+#endif
+
 /**************************** DATA TYPES ****************************/
 typedef unsigned char BYTE;             // 8-bit byte
 typedef unsigned int  WORD;             // 32-bit word, change to "long" for 16-bit machines
@@ -489,7 +495,8 @@ out:
 	    end_time = bpf_ktime_get_ns();
 	    total_latency = end_time - start_time;
 
-	    bpf_printk("Key lookup time: %llu ns\n", total_latency);
+        if (debug)
+	        bpf_printk("Key lookup time: %llu ns\n", total_latency);
     }
     
     return auth_data;

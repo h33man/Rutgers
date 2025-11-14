@@ -41,6 +41,7 @@ KERN_USER_H ?= $(wildcard common_kern_user.h)
 CFLAGS += -I$(LIB_DIR)/install/include $(EXTRA_CFLAGS)
 BPF_CFLAGS += -I$(LIB_DIR)/install/include $(EXTRA_CFLAGS)
 LDFLAGS += -L$(LIB_DIR)/install/lib
+#CFLAGS += -DBPF_DEBUG
 
 BPF_HEADERS := $(wildcard $(HEADER_DIR)/*/*.h) $(wildcard $(INCLUDE_DIR)/*/*.h)
 
