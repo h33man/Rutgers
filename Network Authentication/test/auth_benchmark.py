@@ -41,7 +41,7 @@ class SockperfBenchmark:
         """Check if sockperf is installed"""
         try:
             subprocess.run(["sockperf", "--version"], 
-                          capture_output=True, timeout=5)
+                          capture_output=True, timeout=15) #5)
             return True
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
@@ -61,6 +61,68 @@ class SockperfBenchmark:
         # Subtract UDP (8) + IP (20) headers
         msg_size = max(self.packet_size - 28, 14)  # minimum 14 bytes
         
+        # Calculate std dev by running multiple 1-second tests
+        print(f"  Running {self.duration} x 1-second tests for std dev...")
+        bandwidth_samples = []
+        packets_samples = []
+
+        cmd = [
+            "sockperf", "tp",
+            "-i", self.dst_ip,
+            "-p", str(self.server_port),
+            "-t", "1",  # 1 second test
+            "-m", str(msg_size),
+            "--mps", "max"
+        ]
+
+        try:
+            for i in range(self.duration):
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                bw_1s, packets_1s = self._parse_throughput_output(result.stdout)
+                if bw_1s > 0:
+                    bandwidth_samples.append(bw_1s)
+                    packets_samples.append(packets_1s)
+                    print(f"    Sample {i+1}: {bw_1s:.2f} Mbps")
+
+        except subprocess.TimeoutExpired:
+            print(f"  ✗ Test timed out")
+            return {
+                'bandwidth_mbps': 0.0,
+                'bandwidth_std': 0.0,
+                'packets_sent': 0,
+                'duration': 0.0
+            }
+        except Exception as e:
+            print(f"  ✗ Error: {e}")
+            return {
+                'bandwidth_mbps': 0.0,
+                'bandwidth_std': 0.0,
+                'packets_sent': 0,
+                'duration': 0.0
+            }
+        #except:
+        #    pass
+
+        import statistics
+        bandwidth_mbps = statistics.mean(bandwidth_samples)
+        bandwidth_std = statistics.stdev(bandwidth_samples) if len(bandwidth_samples) > 1 else 0.0
+        packets_sent = sum(packets_samples)
+
+        if bandwidth_mbps > 0:
+            print(f"  ✓ Bandwidth: {bandwidth_mbps:.2f} Mbps")
+            print(f"  ✓ Bandwidth std dev: {bandwidth_std:.2f} Mbps")
+            print(f"  ✓ Packets sent: {packets_sent}")
+        else:
+            print(f"  ✗ Failed to measure bandwidth")
+        
+        return {
+            'bandwidth_mbps': bandwidth_mbps,
+            'bandwidth_std': bandwidth_std,
+            'packets_sent': packets_sent,
+            'duration': self.duration
+        }
+
+        '''
         # Run sockperf in throughput (tp) mode
         cmd = [
             "sockperf", "tp",
@@ -75,14 +137,6 @@ class SockperfBenchmark:
             result = subprocess.run(cmd, capture_output=True, text=True,
                                    timeout=self.duration + 30)
             
-            '''
-            # Print raw output for debugging
-            print(f"\n--- Sockperf Output ---")
-            for line in result.stdout.split('\n'):
-                if 'Summary:' in line or 'Total of' in line or 'Message Rate' in line or 'BandWidth' in line:
-                    print(f"  {line}")
-            print(f"--- End Output ---\n")
-            '''
             # Parse output
             bandwidth_mbps, packets_sent = self._parse_throughput_output(result.stdout)
             
@@ -119,6 +173,7 @@ class SockperfBenchmark:
                 'packets_sent': 0,
                 'duration': 0.0
             }
+        '''
     
     def run_rtt_test(self, num_samples=100):
         """
@@ -141,7 +196,7 @@ class SockperfBenchmark:
             "-p", str(self.server_port),
             "-t", str(int(num_samples / 10)),  # Duration in seconds (approx)
             "--msg-size", str(msg_size),
-            "--pps", "10"  # 10 packets per second for RTT measurement
+            "--pps", "1"  # 10 packets per second for RTT measurement
         ]
         
         try:
