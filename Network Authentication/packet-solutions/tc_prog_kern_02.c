@@ -8,6 +8,7 @@
 /*************************** HEADER FILES ***************************/
 #include "sha256.h"
 #include "sha256_kfunc.h"
+#include "chacha20.h"
 
 extern __u8 debug;
 
@@ -112,7 +113,8 @@ static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
     int header_len = new_ip->ihl * 4;
     new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
 
-    bpf_printk("TC: Hash added, checksum: 0x%04x\n", new_ip->check);
+    if(debug)
+        bpf_printk("TC: Hash added, checksum: 0x%04x\n", new_ip->check);
 
     return 0;
 }
@@ -195,22 +197,55 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
         if (debug)
             bpf_printk("=== Processing packet for hash addition with dynamic key ===\n");
 
-	// Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
-	int ret;
-	if (config_ctx->use_kfunc) {
-	    // Use kernel SHA256 kfunc
-	    bpf_printk("Using kfunc SHA256 for hash\n");
-	    
-	    ret = bpf_sha256_keyed_hash(auth_data->key, 16,
-				       (BYTE *)iphdr,
-				       header_size,
-				       hash_result);
-	} else {
-	    // Use custom SHA256 implementation
-	    bpf_printk("Using custom SHA256 for hash\n");
-	    ret = compute_keyed_hash_from_map_dynamic((BYTE *)iphdr, header_size,
-	                                                   hash_result, auth_data->key);
-	}
+        // Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
+        int ret = 0;
+        if (config_ctx->use_kfunc == 0) {
+            // Use custom SHA256 implementation
+            if (debug)
+                bpf_printk("Using custom SHA256 for hash\n");
+            ret = compute_keyed_hash_from_map_dynamic((BYTE *)iphdr, header_size,
+                                                           hash_result, auth_data->key);
+        }
+        else if (config_ctx->use_kfunc == 1) {
+            // Use kernel SHA256 kfunc
+            if (debug)
+                bpf_printk("Using kfunc SHA256 for hash\n");
+            
+            ret = bpf_sha256_keyed_hash(auth_data->key, 16,
+                           (BYTE *)iphdr, header_size,
+                           hash_result);
+        }
+        else if (config_ctx->use_kfunc == 2) {
+            // Use custom CHACHA20-POLY1305 implementation
+            if (debug)
+                bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+            #if 0
+            ret = compute_chacha20_keyed_hash(auth_data->key, 16, 
+                                   (BYTE *)iphdr, header_size,
+                                        hash_result);
+            #endif
+
+            /* copy header to stack buffer first */
+            __u8 hdr_copy[60] = {};   /* max IPv4 header size */
+
+            if (header_size > 60)
+                header_size = 60;
+
+            /* bpf_skb_load_bytes is the safe way to read packet data */
+            if (bpf_skb_load_bytes(ctx, sizeof(struct ethhdr), hdr_copy, header_size) < 0) {
+                action = TC_ACT_SHOT;
+                goto out;
+            }
+
+            ret = compute_chacha20_keyed_hash(auth_data->key, 16,
+                                              hdr_copy, header_size,
+                                              hash_result);
+
+        } else {
+            // Use custom SHA256 implementation
+            bpf_printk("Invalid option for hash\n");
+        }
+
         if (ret == 0) {
             if (add_ip_option_hash_tc(ctx, iphdr, hash_result) < 0) {
                 bpf_printk("Failed to add hash option\n");
@@ -231,7 +266,7 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
         __u64 end_time = bpf_ktime_get_ns();
     	__u64 total_latency = end_time - start_time;
 
-    	bpf_printk("Latency from SHA256 hash: %d ns\n", total_latency);
+    	bpf_printk("Latency of eBPF program: %d ns\n", total_latency);
     }
 out:
     return tc_stats_record_action(ctx, action);

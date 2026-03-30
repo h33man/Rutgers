@@ -12,7 +12,7 @@ Requirements:
 Usage:
     python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a no_auth
     python3 sockperf_benchmark.py -d 192.168.100.1 -p 1024 -m rtt -a ebpf_auth
-    python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a art_delay 100
+    python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a chacha_auth
 """
 
 import subprocess
@@ -41,7 +41,7 @@ class SockperfBenchmark:
         """Check if sockperf is installed"""
         try:
             subprocess.run(["sockperf", "--version"], 
-                          capture_output=True, timeout=15) #5)
+                          capture_output=True, timeout=15)
             return True
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
@@ -100,11 +100,9 @@ class SockperfBenchmark:
                 'packets_sent': 0,
                 'duration': 0.0
             }
-        #except:
-        #    pass
 
         import statistics
-        bandwidth_mbps = statistics.mean(bandwidth_samples)
+        bandwidth_mbps = statistics.mean(bandwidth_samples) if bandwidth_samples else 0.0
         bandwidth_std = statistics.stdev(bandwidth_samples) if len(bandwidth_samples) > 1 else 0.0
         packets_sent = sum(packets_samples)
 
@@ -121,59 +119,6 @@ class SockperfBenchmark:
             'packets_sent': packets_sent,
             'duration': self.duration
         }
-
-        '''
-        # Run sockperf in throughput (tp) mode
-        cmd = [
-            "sockperf", "tp",
-            "-i", self.dst_ip,
-            "-p", str(self.server_port),
-            "-t", str(self.duration),
-            "-m", str(msg_size),
-            "--mps", "max"  # Maximum messages per second
-        ]
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True,
-                                   timeout=self.duration + 30)
-            
-            # Parse output
-            bandwidth_mbps, packets_sent = self._parse_throughput_output(result.stdout)
-            
-            # sockperf doesn't provide per-second breakdown for std dev
-            # We'll approximate by doing multiple short runs
-            bandwidth_std = 0.0
-            
-            if bandwidth_mbps > 0:
-                print(f"  ✓ Bandwidth: {bandwidth_mbps:.2f} Mbps")
-                print(f"  ✓ Packets sent: {packets_sent}")
-            else:
-                print(f"  ✗ Failed to measure bandwidth")
-            
-            return {
-                'bandwidth_mbps': bandwidth_mbps,
-                'bandwidth_std': bandwidth_std,
-                'packets_sent': packets_sent,
-                'duration': self.duration
-            }
-            
-        except subprocess.TimeoutExpired:
-            print(f"  ✗ Test timed out")
-            return {
-                'bandwidth_mbps': 0.0,
-                'bandwidth_std': 0.0,
-                'packets_sent': 0,
-                'duration': 0.0
-            }
-        except Exception as e:
-            print(f"  ✗ Error: {e}")
-            return {
-                'bandwidth_mbps': 0.0,
-                'bandwidth_std': 0.0,
-                'packets_sent': 0,
-                'duration': 0.0
-            }
-        '''
     
     def run_rtt_test(self, num_samples=100):
         """
@@ -200,8 +145,7 @@ class SockperfBenchmark:
         ]
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True,
-                                   timeout=60)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
             # Parse output
             rtt_stats = self._parse_rtt_output(result.stdout)
@@ -218,53 +162,31 @@ class SockperfBenchmark:
         except subprocess.TimeoutExpired:
             print(f"  ✗ Test timed out")
             return {
-                'avg_rtt': 0.0,
-                'std_rtt': 0.0,
-                'min_rtt': 0.0,
-                'max_rtt': 0.0,
-                'successful': 0,
-                'total': num_samples
+                'avg_rtt': 0.0, 'std_rtt': 0.0, 'min_rtt': 0.0,
+                'max_rtt': 0.0, 'successful': 0, 'total': num_samples
             }
         except Exception as e:
             print(f"  ✗ Error: {e}")
             return {
-                'avg_rtt': 0.0,
-                'std_rtt': 0.0,
-                'min_rtt': 0.0,
-                'max_rtt': 0.0,
-                'successful': 0,
-                'total': num_samples
+                'avg_rtt': 0.0, 'std_rtt': 0.0, 'min_rtt': 0.0,
+                'max_rtt': 0.0, 'successful': 0, 'total': num_samples
             }
     
     def _parse_throughput_output(self, output):
-        """
-        Parse sockperf throughput (tp) output
-        
-        Example output:
-            sockperf: Total of 2970017 messages sent in 10.000 sec
-            sockperf: Summary: Message Rate is 296989 [msg/sec]
-            sockperf: Summary: BandWidth is 72.507 MBps (580.057 Mbps)
-        """
         bandwidth_mbps = 0.0
         packets_sent = 0
         
         for line in output.split('\n'):
-            # Parse bandwidth line
-            # Example: "sockperf: Summary: BandWidth is 72.507 MBps (580.057 Mbps)"
             if 'BandWidth' in line and 'Mbps' in line:
-                # Extract the Mbps value in parentheses
                 mbps_match = re.search(r'\((\d+\.?\d*)\s*Mbps\)', line)
                 if mbps_match:
                     bandwidth_mbps = float(mbps_match.group(1))
                 else:
-                    # Fallback: try to find MBps and convert
                     mbytes_match = re.search(r'is\s+(\d+\.?\d*)\s*MBps', line)
                     if mbytes_match:
                         bandwidth_mbytes = float(mbytes_match.group(1))
-                        bandwidth_mbps = bandwidth_mbytes * 8  # Convert MBps to Mbps
+                        bandwidth_mbps = bandwidth_mbytes * 8 
             
-            # Parse total messages
-            # Example: "sockperf: Total of 2970017 messages sent in 10.000 sec"
             if 'Total of' in line and 'messages sent' in line:
                 total_match = re.search(r'Total of\s+(\d+)\s+messages', line)
                 if total_match:
@@ -273,58 +195,45 @@ class SockperfBenchmark:
         return bandwidth_mbps, packets_sent
     
     def _parse_rtt_output(self, output):
-        """Parse sockperf ping-pong output"""
-        avg_rtt = 0.0
-        std_rtt = 0.0
-        min_rtt = 0.0
-        max_rtt = 0.0
-        successful = 0
+        avg_rtt, std_rtt, min_rtt, max_rtt, successful = 0.0, 0.0, 0.0, 0.0, 0
         
         for line in output.split('\n'):
-            # Example: "====> avg-latency=23.287 (std-dev=1.866)"
             if 'avg-latency' in line:
                 avg_match = re.search(r'avg-latency=([\d.]+)', line)
                 std_match = re.search(r'std-dev=([\d.]+)', line)
-                if avg_match:
-                    avg_rtt = float(avg_match.group(1)) #* 1000.0  # Convert usec to ms
-                if std_match:
-                    std_rtt = float(std_match.group(1)) #* 1000.0
+                if avg_match: avg_rtt = float(avg_match.group(1))
+                if std_match: std_rtt = float(std_match.group(1))
             
-            # Example: "---> <MIN> observation =  21.804"
             if '<MIN>' in line:
                 min_match = re.search(r'observation\s*=\s*([\d.]+)', line)
-                if min_match:
-                    min_rtt = float(min_match.group(1)) #* 1000.0
+                if min_match: min_rtt = float(min_match.group(1))
             
-            # Example: "---> <MAX> observation =  175.439"
             if '<MAX>' in line:
                 max_match = re.search(r'observation\s*=\s*([\d.]+)', line)
-                if max_match:
-                    max_rtt = float(max_match.group(1)) #* 1000.0
+                if max_match: max_rtt = float(max_match.group(1))
             
-            # Count successful messages
             if 'Total' in line and 'messages' in line:
                 total_match = re.search(r'Total\s+(\d+)', line)
-                if total_match:
-                    successful = int(total_match.group(1))
+                if total_match: successful = int(total_match.group(1))
         
         return {
-            'avg_rtt': avg_rtt,
-            'std_rtt': std_rtt,
-            'min_rtt': min_rtt,
-            'max_rtt': max_rtt,
-            'successful': successful,
-            'total': successful
+            'avg_rtt': avg_rtt, 'std_rtt': std_rtt, 'min_rtt': min_rtt,
+            'max_rtt': max_rtt, 'successful': successful, 'total': successful
         }
 
 def write_json_results(filename, dst_ip, packet_size, duration, 
                       bw_stats, rtt_stats, phase, loop_count=-1):
-    """Write results to JSON file"""
     
-    # Check if file exists
     if os.path.exists(filename):
         with open(filename, 'r') as f:
             data = json.load(f)
+            
+            # Ensure chacha_auth dictionary exists in loaded old files
+            if "chacha_auth" not in data.get("results", {}):
+                data["results"]["chacha_auth"] = {
+                    "bandwidth": {}, "bandwidth_std": {}, "rtt": {}, 
+                    "rtt_std": {}, "rtt_min": {}, "rtt_max": {}, "packets_sent": {}
+                }
     else:
         # Create new structure
         data = {
@@ -347,13 +256,16 @@ def write_json_results(filename, dst_ip, packet_size, duration,
                     "bandwidth": {}, "bandwidth_std": {}, "rtt": {}, 
                     "rtt_std": {}, "rtt_min": {}, "rtt_max": {}, "packets_sent": {}
                 },
+                "chacha_auth": {
+                    "bandwidth": {}, "bandwidth_std": {}, "rtt": {}, 
+                    "rtt_std": {}, "rtt_min": {}, "rtt_max": {}, "packets_sent": {}
+                },
                 "art_delay": {}
             }
         }
     
     # Update results
     if phase == "art_delay" and loop_count >= 0:
-        # Artificial delay results
         if str(loop_count) not in data['results']['art_delay']:
             data['results']['art_delay'][str(loop_count)] = {
                 'bandwidth': {}, 'bandwidth_std': {}, 'rtt': {},
@@ -391,7 +303,7 @@ def main():
 Examples:
   python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a no_auth
   python3 sockperf_benchmark.py -d 192.168.100.1 -p 1024 -m rtt -a ebpf_auth
-  python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a art_delay 100
+  python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a chacha_auth
 
 Note: Requires sockperf server running on destination:
   sockperf server -p 11111
@@ -412,7 +324,7 @@ Note: Requires sockperf server running on destination:
     parser.add_argument("-o", "--output", default="udp_benchmark_results.json",
                        help="Output JSON file (default: udp_benchmark_results.json)")
     parser.add_argument("-a", "--phase", nargs='+', default=['no_auth'],
-                       help="Phase: no_auth, ebpf_auth, kernel_auth, or 'art_delay N'")
+                       help="Phase: no_auth, ebpf_auth, kernel_auth, chacha_auth, or 'art_delay N'")
     
     args = parser.parse_args()
     
@@ -446,11 +358,9 @@ Note: Requires sockperf server running on destination:
         print()
     print(f"  Output: {args.output}")
     
-    # Create benchmark instance
     benchmark = SockperfBenchmark(args.dst_ip, args.packet_size, 
                                   args.duration, args.interface)
     
-    # Run tests
     bw_stats = {'bandwidth_mbps': 0, 'bandwidth_std': 0, 'packets_sent': 0, 'duration': 0}
     rtt_stats = {'avg_rtt': 0, 'std_rtt': 0, 'min_rtt': 0, 'max_rtt': 0, 
                  'successful': 0, 'total': 0}
@@ -467,7 +377,6 @@ Note: Requires sockperf server running on destination:
         print("="*70)
         rtt_stats = benchmark.run_rtt_test()
     
-    # Print summary
     print("\n" + "="*70)
     print("Summary")
     print("="*70)
@@ -477,11 +386,10 @@ Note: Requires sockperf server running on destination:
         print(f"Packets sent: {bw_stats['packets_sent']}")
     
     if args.mode in ['both', 'rtt']:
-        print(f"RTT: {rtt_stats['avg_rtt']:.3f} ± {rtt_stats['std_rtt']:.3}f µs")
+        print(f"RTT: {rtt_stats['avg_rtt']:.3f} ± {rtt_stats['std_rtt']:.3f} µs")
         print(f"Range: {rtt_stats['min_rtt']:.3f} - {rtt_stats['max_rtt']:.3f} µs")
         print(f"Success: {rtt_stats['successful']}/{rtt_stats['total']}")
     
-    # Save results
     write_json_results(args.output, args.dst_ip, args.packet_size, args.duration,
                       bw_stats, rtt_stats, phase, loop_count)
     
