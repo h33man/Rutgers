@@ -383,15 +383,15 @@ static __always_inline int sha256_final(BYTE hash[])
 
 /****************************** HELPER FUNCTIONS ******************************/
 
-#if 0
 // Function to print a hex dump of binary data
 void print_hex(const unsigned char *data, int len) {
-    if (len > 20) return;
+    //if (len > 20) return;
     for (int i = 0; i < len; i++)
-        bpf_printk("%02x\n", data[i++]);
+        bpf_printk("%02x", data[i++]);
     bpf_printk("\n");
 }
 
+#if 0
 // Function to dump IP header details
 void dump_ip_header(const struct iphdr *ip_header) {
     bpf_printk("\n=== IP HEADER DUMP ===\n");

@@ -1,5 +1,5 @@
 /*********************************************************************
-* XDP Program for SHA256-Hash key Source IP lookup and HMAC computation
+* XDP Program for Hash key - Source IP lookup and HMAC computation
 * 
 * Author: Himanshu Chandra 
 * Email:  himanshu.chandra@rutgers.edu
@@ -9,22 +9,9 @@
 *          Includes LPM trie-based key lookup for per-source-IP authentication.
 *          Custom SHA-256 implementation in eBPF and kernel, runtime selection via use_kfunc flag.
 *********************************************************************/
-/*********************************************************************
-* Filename:   sha256.c
-* Author:     Brad Conte (brad AT bradconte.com)
-* Copyright:
-* Disclaimer: This code is presented "as is" without any guarantees.
-* Details:    Implementation of the SHA-256 hashing algorithm.
-              SHA-256 is one of the three algorithms in the SHA2
-              specification. The others, SHA-384 and SHA-512, are not
-              offered in this implementation.
-              Algorithm specification can be found here:
-               * http://csrc.nist.gov/publications/fips/fips180-2/fips180-2withchangenotice.pdf
-              This implementation uses little endian byte order.
-*********************************************************************/
-
 /*************************** HEADER FILES ***************************/
 #include "sha256.h"
+#include "chacha20.h"
 
 extern __u8 debug;
 
@@ -154,9 +141,16 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     verify_ctx->original_header.tot_len = bpf_htons(bpf_ntohs(verify_ctx->original_header.tot_len) - options_len);
     verify_ctx->original_header.check = 0;
 
-    // Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
-    int ret;
-    if (config_ctx->use_kfunc) {
+    int ret = 0;
+    if (config_ctx->use_kfunc == 0) {
+        // Use custom SHA256 implementation
+        if (debug)
+            bpf_printk("Using custom SHA256 for verification\n");
+
+        ret = compute_keyed_hash_from_map_dynamic((BYTE *)&verify_ctx->original_header,
+                                            sizeof(struct iphdr), verify_ctx->computed_hash, dynamic_key);
+    }
+    else if (config_ctx->use_kfunc == 1) {
         // Use kernel SHA256 kfunc
         if (debug)
             bpf_printk("Using kfunc SHA256 for verification\n");
@@ -165,19 +159,70 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
                                    (const __u8 *)&verify_ctx->original_header,
                                    sizeof(struct iphdr), 
                                    verify_ctx->computed_hash);
-    } else {
-        // Use custom SHA256 implementation
-        if (debug)
-            bpf_printk("Using custom SHA256 for verification\n");
-
-        ret = compute_keyed_hash_from_map_dynamic((BYTE *)&verify_ctx->original_header,
-                                            sizeof(struct iphdr), verify_ctx->computed_hash, dynamic_key);
     }
+    #if 0
+    else if (config_ctx->use_kfunc == 2) {
+        // Use custom CHACHA20-POLY1305 implementation
+        //if (debug)
+            bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+
+        /* Copy to stack buffer - verifier can track bounds on stack */
+        __u8 hdr_copy[60] = {};
+        if (header_size > 60)
+            header_size = 60;
+
+        /* XDP uses __builtin_memcpy not bpf_skb_load_bytes */
+        __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
+                                   sizeof(struct iphdr)); 
+
+        ret = compute_chacha20_keyed_hash(dynamic_key, 16,
+                                          hdr_copy, header_size,
+                                   //(const __u8 *)&verify_ctx->original_header,
+                                   //sizeof(struct iphdr), 
+                                   verify_ctx->computed_hash);
+    }
+    #else
+    else if (config_ctx->use_kfunc == 2) {
+        if(debug)
+            bpf_printk("Using custom CHACHA20-POLY1305 for verification\n");
+
+        /* Reconstruct the header the sender hashed:
+         * - base IP header only (20 bytes)
+         * - ihl=5 (no options)
+         * - tot_len adjusted
+         * - check=0
+         * This must exactly match what tc_prog_kern_02.c hashed */
+        __u8 hdr_copy[20] = {};
+        __builtin_memcpy(hdr_copy,
+                         (const __u8 *)&verify_ctx->original_header,
+                         sizeof(struct iphdr));   /* already 20 bytes, ihl=5, check=0 */
+
+        /* Use the nonce from the received hash to reproduce the tag */
+        ret = verify_chacha20_keyed_hash(dynamic_key, 16,
+                                         hdr_copy, sizeof(struct iphdr),
+                                         verify_ctx->extracted_hash,   /* contains nonce */
+                                         verify_ctx->computed_hash);
+        if (!ret) {
+            if (debug)
+                bpf_printk("Hash verification PASSED with dynamic key\n");
+            return 0;
+        }
+    }
+    #endif
+    else {
+        bpf_printk("Invalid option for hash\n");
+    }
+
 
     if (ret != 0) {
         bpf_printk("Failed to compute hash for verification\n");
         return -1;
     }
+
+    bpf_printk("CHACHA2yy20 hash recieved: ");
+    print_hex(verify_ctx->extracted_hash, 32);
+    bpf_printk("CHACHA2yy20 hash computed: ");
+    print_hex(verify_ctx->computed_hash, 32);
 
     int hash_match = 1;
     #pragma unroll
@@ -574,25 +619,25 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
         if (debug)
             bpf_printk("=== Processing packet for hash addition with dynamic key ===\n");
 
-	// Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
-	int ret;
-	if (config_ctx->use_kfunc) {
-	    // Use kernel SHA256 kfunc
-        if (debug)
-	        bpf_printk("Using kfunc SHA256 for verification\n");
+        // Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
+        int ret;
+        if (config_ctx->use_kfunc) {
+            // Use kernel SHA256 kfunc
+            if (debug)
+                bpf_printk("Using kfunc SHA256 for verification\n");
 
-	    ret = bpf_sha256_keyed_hash(auth_data->key, 16,
-				       (BYTE *)iphdr,
-				       header_size,
-				       hash_result);
-	} else {
-	    // Use custom SHA256 implementation
-        if (debug)
-	        bpf_printk("Using custom SHA256 for verification\n");
+            ret = bpf_sha256_keyed_hash(auth_data->key, 16,
+                           (BYTE *)iphdr,
+                           header_size,
+                           hash_result);
+        } else {
+            // Use custom SHA256 implementation
+            if (debug)
+                bpf_printk("Using custom SHA256 for verification\n");
 
-	    ret = compute_keyed_hash_from_map_dynamic((BYTE *)iphdr, header_size,
-	                                                   hash_result, auth_data->key);
-	}
+            ret = compute_keyed_hash_from_map_dynamic((BYTE *)iphdr, header_size,
+                                                           hash_result, auth_data->key);
+        }
 
         if (ret == 0) {
             if (add_ip_option_hash(ctx, iphdr, hash_result, auth_data->key) < 0) {
