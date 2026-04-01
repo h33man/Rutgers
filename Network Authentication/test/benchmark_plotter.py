@@ -114,12 +114,20 @@ class BenchmarkPlotter:
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
         bars3 = ax.bar(x_positions + 0.5*width, kernel_auth_bw, width,
+<<<<<<< HEAD
                       yerr=kernel_auth_std, label='Kernel Authentication',
+=======
+                      yerr=kernel_auth_std, label='Kernel SHA-256 Auth',
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
                       color=self.colors['kernel_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
 
         bars4 = ax.bar(x_positions + 1.5*width, chacha_auth_bw, width,
+<<<<<<< HEAD
                       yerr=chacha_auth_std, label='Chacha Authentication',
+=======
+                      yerr=chacha_auth_std, label='Kernel Chacha20 Auth',
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
                       color=self.colors['chacha_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
@@ -174,12 +182,20 @@ class BenchmarkPlotter:
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
         bars3 = ax.bar(x_positions + 0.5*width, kernel_auth_rtt, width,
+<<<<<<< HEAD
                       yerr=kernel_auth_std, label='Kernel Authentication',
+=======
+                      yerr=kernel_auth_std, label='Kernel SHA-256 Auth',
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
                       color=self.colors['kernel_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
 
         bars4 = ax.bar(x_positions + 1.5*width, chacha_auth_rtt, width,
+<<<<<<< HEAD
                       yerr=chacha_auth_std, label='Chacha Authentication',
+=======
+                      yerr=chacha_auth_std, label='Kernel Chacha20 Auth',
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
                       color=self.colors['chacha_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
@@ -212,10 +228,23 @@ class BenchmarkPlotter:
         ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt')
         kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt')
         chacha_auth_rtt = self.extract_data_arrays('chacha_auth', 'rtt')
+<<<<<<< HEAD
+=======
+
+        # Extract standard deviations
+        no_auth_std = self.extract_data_arrays('no_auth', 'rtt_std')
+        ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'rtt_std')
+        kernel_auth_std = self.extract_data_arrays('kernel_auth', 'rtt_std')
+        chacha_auth_std = self.extract_data_arrays('chacha_auth', 'rtt_std')
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
 
         # X labels
         x_labels = [str(size) for size in self.packet_sizes]
+
+        # Error bar kwargs — consistent with bandwidth plot style
+        eb_kw = dict(linewidth=1.5, ecolor='gray')
         
+<<<<<<< HEAD
         # Line plot for RTT
         ax.plot(self.packet_sizes, no_auth_rtt, 'o-', 
                linewidth=2.5, markersize=8, label='No Authentication', 
@@ -228,6 +257,28 @@ class BenchmarkPlotter:
         ax.plot(self.packet_sizes, kernel_auth_rtt, '^-',
                linewidth=2.5, markersize=8, label='Kernel Authentication',
                color='#FF8C00', alpha=0.8)
+=======
+        # Line plot for RTT with error bars
+        ax.errorbar(self.packet_sizes, no_auth_rtt, yerr=no_auth_std,
+               fmt='o-', linewidth=2.5, markersize=8, label='No Authentication',
+               color='#4169E1', alpha=0.8, capsize=5, capthick=1.5,
+               elinewidth=1.5, ecolor='gray')
+
+        ax.errorbar(self.packet_sizes, ebpf_auth_rtt, yerr=ebpf_auth_std,
+               fmt='s-', linewidth=2.5, markersize=8, label='eBPF SHA-256 Auth',
+               color='#DC143C', alpha=0.8, capsize=5, capthick=1.5,
+               elinewidth=1.5, ecolor='gray')
+
+        ax.errorbar(self.packet_sizes, kernel_auth_rtt, yerr=kernel_auth_std,
+               fmt='^-', linewidth=2.5, markersize=8, label='Kernel SHA-256 Auth',
+               color='#FF8C00', alpha=0.8, capsize=5, capthick=1.5,
+               elinewidth=1.5, ecolor='gray')
+
+        ax.errorbar(self.packet_sizes, chacha_auth_rtt, yerr=chacha_auth_std,
+               fmt='d-', linewidth=2.5, markersize=8, label='Kernel Chacha20 Auth',
+               color='#32CD32', alpha=0.8, capsize=5, capthick=1.5,
+               elinewidth=1.5, ecolor='gray') # LimeGreen
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
 
         ax.plot(self.packet_sizes, chacha_auth_rtt, 'd-',
                linewidth=2.5, markersize=8, label='Chacha Authentication',
@@ -407,9 +458,15 @@ class BenchmarkPlotter:
             if avg_ebpf_bw > 0:
                 report.append(f"eBPF Authentication:       {avg_ebpf_bw:>8.2f} Mbps ({(1 - avg_ebpf_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
             if avg_kernel_bw > 0:
+<<<<<<< HEAD
                 report.append(f"Kernel Authentication:     {avg_kernel_bw:>8.2f} Mbps ({(1 - avg_kernel_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
             if avg_chacha_bw > 0:
                 report.append(f"Chacha Authentication:     {avg_chacha_bw:>8.2f} Mbps ({(1 - avg_chacha_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
+=======
+                report.append(f"Kernel SHA-256 Auth:     {avg_kernel_bw:>8.2f} Mbps ({(1 - avg_kernel_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
+            if avg_chacha_bw > 0:
+                report.append(f"Kernel Chacha20 Auth:     {avg_chacha_bw:>8.2f} Mbps ({(1 - avg_chacha_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
         
         # Overall RTT comparison
         report.append("\nROUND TRIP TIME ANALYSIS (ms):")
@@ -425,9 +482,15 @@ class BenchmarkPlotter:
             if avg_ebpf_rtt > 0:
                 report.append(f"eBPF Authentication:       {avg_ebpf_rtt:>8.3f} ms ({(avg_ebpf_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
             if avg_kernel_rtt > 0:
+<<<<<<< HEAD
                 report.append(f"Kernel Authentication:     {avg_kernel_rtt:>8.3f} ms ({(avg_kernel_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
             if avg_chacha_rtt > 0:
                 report.append(f"Chacha Authentication:     {avg_chacha_rtt:>8.3f} ms ({(avg_chacha_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
+=======
+                report.append(f"Kernel SHA-256 Auth:     {avg_kernel_rtt:>8.3f} ms ({(avg_kernel_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
+            if avg_chacha_rtt > 0:
+                report.append(f"Kernel Chacha20 Auth:     {avg_chacha_rtt:>8.3f} ms ({(avg_chacha_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
         
         # Detailed breakdown
         report.append("\n" + "=" * 90)

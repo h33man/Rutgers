@@ -1,5 +1,5 @@
 # Makefile for sha256_kfunc
-obj-m := sha256_kfunc.o
+obj-m := sha256_kfunc.o chacha20_kfunc.o
 
 KBUILD_CFLAGS += -g
 

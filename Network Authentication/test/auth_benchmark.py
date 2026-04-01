@@ -12,7 +12,7 @@ Requirements:
 Usage:
     python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a no_auth
     python3 sockperf_benchmark.py -d 192.168.100.1 -p 1024 -m rtt -a ebpf_auth
-    python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a chacha_auth
+    python3 sockperf_benchmark.py -d 192.168.100.1 -p 8192 -a chacha_auth 
 """
 
 import subprocess

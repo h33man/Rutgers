@@ -11,7 +11,7 @@
 *********************************************************************/
 /*************************** HEADER FILES ***************************/
 #include "sha256.h"
-#include "chacha20.h"
+#include "chacha20_kfunc.h"
 
 extern __u8 debug;
 
@@ -160,10 +160,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
                                    sizeof(struct iphdr), 
                                    verify_ctx->computed_hash);
     }
-    #if 0
+    #if 1
     else if (config_ctx->use_kfunc == 2) {
         // Use custom CHACHA20-POLY1305 implementation
-        //if (debug)
+        if (debug)
             bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
 
         /* Copy to stack buffer - verifier can track bounds on stack */
@@ -175,11 +175,17 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
                                    sizeof(struct iphdr)); 
 
+        #if 0
         ret = compute_chacha20_keyed_hash(dynamic_key, 16,
                                           hdr_copy, header_size,
                                    //(const __u8 *)&verify_ctx->original_header,
                                    //sizeof(struct iphdr), 
                                    verify_ctx->computed_hash);
+        #endif
+        ret = bpf_chacha20poly1305_auth(dynamic_key, 16,
+                                        hdr_copy, sizeof(struct iphdr),
+                                        verify_ctx->computed_hash);
+
     }
     #else
     else if (config_ctx->use_kfunc == 2) {
@@ -202,6 +208,11 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
                                          hdr_copy, sizeof(struct iphdr),
                                          verify_ctx->extracted_hash,   /* contains nonce */
                                          verify_ctx->computed_hash);
+
+        /* The existing hash_match loop compares all 32 bytes.
+         * Because the kfunc zero-pads bytes 16-31 on both sides, the
+         * comparison is still correct – the zeros will match. */
+
         if (!ret) {
             if (debug)
                 bpf_printk("Hash verification PASSED with dynamic key\n");
@@ -219,10 +230,12 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         return -1;
     }
 
-    bpf_printk("CHACHA2yy20 hash recieved: ");
-    print_hex(verify_ctx->extracted_hash, 32);
-    bpf_printk("CHACHA2yy20 hash computed: ");
-    print_hex(verify_ctx->computed_hash, 32);
+    if(debug) {
+        bpf_printk("CHACHA220 hash recieved: ");
+        print_hex(verify_ctx->extracted_hash, 32);
+        bpf_printk("CHACHA220 hash computed: ");
+        print_hex(verify_ctx->computed_hash, 32);
+    }
 
     int hash_match = 1;
     #pragma unroll

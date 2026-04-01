@@ -8,7 +8,11 @@
 /*************************** HEADER FILES ***************************/
 #include "sha256.h"
 #include "sha256_kfunc.h"
+<<<<<<< HEAD
 #include "chacha20.h"
+=======
+#include "chacha20_kfunc.h"
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
 
 extern __u8 debug;
 
@@ -219,11 +223,14 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
             // Use custom CHACHA20-POLY1305 implementation
             if (debug)
                 bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+<<<<<<< HEAD
             #if 0
             ret = compute_chacha20_keyed_hash(auth_data->key, 16, 
                                    (BYTE *)iphdr, header_size,
                                         hash_result);
             #endif
+=======
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
 
             /* copy header to stack buffer first */
             __u8 hdr_copy[60] = {};   /* max IPv4 header size */
@@ -237,9 +244,23 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
                 goto out;
             }
 
+<<<<<<< HEAD
             ret = compute_chacha20_keyed_hash(auth_data->key, 16,
                                               hdr_copy, header_size,
                                               hash_result);
+=======
+            #if 0
+            ret = compute_chacha20_keyed_hash(auth_data->key, 16,
+                                              hdr_copy, header_size,
+                                              hash_result);
+            #endif
+
+            ret = bpf_chacha20poly1305_auth(auth_data->key, 16, 
+                                            hdr_copy, header_size, 
+                                            hash_result);
+            /* hash_result[0..15]  = Poly1305 tag
+             * hash_result[16..31] = 0 (zero-padded by kfunc) */
+>>>>>>> 03ddeb4 (Adde Chacha20 kernel module)
 
         } else {
             // Use custom SHA256 implementation
@@ -248,7 +269,6 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
 
         if (ret == 0) {
             if (add_ip_option_hash_tc(ctx, iphdr, hash_result) < 0) {
-                bpf_printk("Failed to add hash option\n");
                 action = TC_ACT_OK;
             } else {
                 if (debug)
