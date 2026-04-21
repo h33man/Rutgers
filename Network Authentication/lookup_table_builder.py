@@ -39,7 +39,7 @@ class LookupTableBuilder:
     
     def generate_random_key(self) -> str:
         """Generate a random 32-byte (256-bit) hex key for SHA-256."""
-        return ''.join([f"{random.randint(0, 255):02x}" for _ in range(16)])
+        return ''.join([f"{random.randint(0, 255):02x}" for _ in range(64)])
     
     def generate_realistic_prefixes(self, count: int = 1000) -> List[Tuple[str, int]]:
         """Generate realistic data center prefixes with proper distribution."""

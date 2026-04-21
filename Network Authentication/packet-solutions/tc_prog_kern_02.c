@@ -211,7 +211,7 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
             if (debug)
                 bpf_printk("Using kfunc SHA256 for hash\n");
             
-            ret = bpf_sha256_keyed_hash(auth_data->key, 16,
+            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
                            (BYTE *)iphdr, header_size,
                            hash_result);
         }

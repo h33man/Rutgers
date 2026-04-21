@@ -26,9 +26,8 @@
 // Must match the eBPF program definitions
 struct auth_data {
     __u32 field_mask;
-    __u8 key[16];       // Changed from 32 to 16 bytes
+    __u8 key[64];
     __u8 action;
-    // Removed key_id and reserved fields - not needed
 };
 
 struct ipv4_lpm_key {
@@ -135,16 +134,16 @@ static int parse_ip_prefix(const char *ip_str, struct ipv4_lpm_key *key) {
     return 0;
 }
 
-// Parse hex key string (16 bytes = 32 hex characters)
+// Parse hex key string (64 bytes = 128 hex characters)
 static int parse_hex_key(const char *hex_str, __u8 *key) {
     size_t hex_len = strlen(hex_str);
 
-    if (hex_len != 32) {  // Changed from 64 to 32 characters
-        fprintf(stderr, "ERROR: Hex key must be exactly 32 characters (16 bytes)\n");
+    if (hex_len != 128) {
+        fprintf(stderr, "ERROR: Hex key must be exactly 128 characters (64 bytes)\n");
         return -1;
     }
 
-    for (int i = 0; i < 16; i++) {  // Changed from 32 to 16 bytes
+    for (int i = 0; i < 64; i++) {  // 64 bytes
         int byte_val;
         if (sscanf(hex_str + (i * 2), "%2x", &byte_val) != 1) {
             fprintf(stderr, "ERROR: Invalid hex character at position %d\n", i * 2);
@@ -159,10 +158,10 @@ static int parse_hex_key(const char *hex_str, __u8 *key) {
 // Generate a simple key from a password string (for demo purposes)
 static void generate_key_from_password(const char *password, __u8 *key) {
     // Simple key derivation (NOT cryptographically secure - use PBKDF2 in production)
-    memset(key, 0, 16);  // Changed from 32 to 16 bytes
+    memset(key, 0, 64);
     size_t pass_len = strlen(password);
 
-    for (int i = 0; i < 16; i++) {  // Changed from 32 to 16 bytes
+    for (int i = 0; i < 64; i++) {
         key[i] = password[i % pass_len] ^ (i * 37);
     }
 }
@@ -302,7 +301,7 @@ static int show_key(const char *ip_prefix) {
 
     printf("Authentication key for %s:\n", ip_prefix);
     printf("Hex: ");
-    for (int i = 0; i < 16; i++) {  // Changed from 32 to 16 bytes
+    for (int i = 0; i < 64; i++) {
         printf("%02x", auth_rule.key[i]);
     }
     printf("\n");
@@ -502,7 +501,7 @@ static int vault_fetch_key(const char *vault_url,
     // {
     //   "data": {
     //     "data": {
-    //       "key": "<32 hex chars>"
+    //       "key": "<128 hex chars>"
     //     },
     //     "metadata": { ... }
     //   }
@@ -549,15 +548,15 @@ out:
    3. Fetches the hex key for that network prefix.
    4. Calls the existing add_auth_rule() to load the key into the eBPF map.
   
-   NOTE: auth_data.key is 16 bytes (32 hex chars) as defined in the existing
-   struct.  The daemon must store a 32-character hex string (16 bytes) in Vault
-   under the "key" field.  If you later extend the struct to 32 bytes, update
+   NOTE: auth_data.key is 64 bytes (128 hex chars) as defined in the existing
+   struct.  The daemon must store a 128-character hex string (64 bytes) in Vault
+   under the "key" field.  If you later extend the struct, update
    parse_hex_key() and the key array size accordingly.
   
    Returns 0 on success, -1 on error, -2 on key expiry.  */
 static int fetch_key_from_vault(const char *ip_prefix, const char *vault_url) {
     char token[512]   = {0};
-    char hex_key[128] = {0};
+    char hex_key[256] = {0};
 
     // Step 1: derive network address from the user-supplied prefix 
     // The user may pass a host address (192.168.100.2/24).  We mask off the
@@ -623,7 +622,7 @@ static void print_usage(const char *prog_name) {
     printf("Commands:\n");
     printf("  init                                    Find and connect to existing BPF maps\n");
     printf("  add <ip/prefix> <password>              Add rule with password-based key\n");
-    printf("  add-hex <ip/prefix> <hex_key>           Add rule with 32-char hex key\n");
+    printf("  add-hex <ip/prefix> <hex_key>           Add rule with 128-char hex key\n");
     printf("  add-key <ip/prefix> <vault_url>         Fetch key from Vault and add rule\n");
     printf("  delete <ip/prefix>                      Delete authentication rule\n");
     printf("  list                                    List all authentication rules\n");
@@ -661,7 +660,7 @@ int main(int argc, char **argv) {
     } else if (strcmp(command, "add-hex") == 0) {
         if (argc != 4) {
             fprintf(stderr, "Usage: %s add-hex <ip/prefix> <hex_key>\n", argv[0]);
-            fprintf(stderr, "Note: hex_key must be exactly 32 hex characters (16 bytes)\n");
+            fprintf(stderr, "Note: hex_key must be exactly 128 hex characters (64 bytes)\n");
             return 1;
         }
         return add_auth_rule(argv[2], FIELD_SRC_IP | FIELD_DST_IP,

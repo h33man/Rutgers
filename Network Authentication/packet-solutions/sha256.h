@@ -96,9 +96,15 @@ static const WORD k[64] = {
 };
 
 /* Secret key for HMAC-like functionality */
-static const BYTE SECRET_KEY[16] = {
+static const BYTE SECRET_KEY[64] = {
     0x4b, 0x75, 0x8f, 0x94, 0x98, 0xd3, 0x31, 0x26,
-    0x16, 0xec, 0xc2, 0x61, 0x99, 0x43, 0x76, 0x45
+    0x16, 0xec, 0xc2, 0x61, 0x99, 0x43, 0x76, 0x45,
+    0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91,
+    0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08, 0x19,
+    0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f, 0x70, 0x81,
+    0x92, 0xa3, 0xb4, 0xc5, 0xd6, 0xe7, 0xf8, 0x09,
+    0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x5f, 0x60, 0x71,
+    0x82, 0x93, 0xa4, 0xb5, 0xc6, 0xd7, 0xe8, 0xf9
 };
 
 /****************************** COMMON STRUCTURES ******************************/
@@ -106,7 +112,7 @@ static const BYTE SECRET_KEY[16] = {
 // Authentication data structure for IP header authentication
 struct ip_auth_data {
     __u32 field_mask;
-    __u8 key[16];
+    __u8 key[64];
     __u8 action;
 };
 
@@ -533,35 +539,83 @@ static __always_inline int compute_keyed_hash_from_map_dynamic(const BYTE *data,
     temp->buffer[13] = dynamic_key[13];
     temp->buffer[14] = dynamic_key[14];
     temp->buffer[15] = dynamic_key[15];
+    temp->buffer[16] = dynamic_key[16];
+    temp->buffer[17] = dynamic_key[17];
+    temp->buffer[18] = dynamic_key[18];
+    temp->buffer[19] = dynamic_key[19];
+    temp->buffer[20] = dynamic_key[20];
+    temp->buffer[21] = dynamic_key[21];
+    temp->buffer[22] = dynamic_key[22];
+    temp->buffer[23] = dynamic_key[23];
+    temp->buffer[24] = dynamic_key[24];
+    temp->buffer[25] = dynamic_key[25];
+    temp->buffer[26] = dynamic_key[26];
+    temp->buffer[27] = dynamic_key[27];
+    temp->buffer[28] = dynamic_key[28];
+    temp->buffer[29] = dynamic_key[29];
+    temp->buffer[30] = dynamic_key[30];
+    temp->buffer[31] = dynamic_key[31];
+    temp->buffer[32] = dynamic_key[32];
+    temp->buffer[33] = dynamic_key[33];
+    temp->buffer[34] = dynamic_key[34];
+    temp->buffer[35] = dynamic_key[35];
+    temp->buffer[36] = dynamic_key[36];
+    temp->buffer[37] = dynamic_key[37];
+    temp->buffer[38] = dynamic_key[38];
+    temp->buffer[39] = dynamic_key[39];
+    temp->buffer[40] = dynamic_key[40];
+    temp->buffer[41] = dynamic_key[41];
+    temp->buffer[42] = dynamic_key[42];
+    temp->buffer[43] = dynamic_key[43];
+    temp->buffer[44] = dynamic_key[44];
+    temp->buffer[45] = dynamic_key[45];
+    temp->buffer[46] = dynamic_key[46];
+    temp->buffer[47] = dynamic_key[47];
+    temp->buffer[48] = dynamic_key[48];
+    temp->buffer[49] = dynamic_key[49];
+    temp->buffer[50] = dynamic_key[50];
+    temp->buffer[51] = dynamic_key[51];
+    temp->buffer[52] = dynamic_key[52];
+    temp->buffer[53] = dynamic_key[53];
+    temp->buffer[54] = dynamic_key[54];
+    temp->buffer[55] = dynamic_key[55];
+    temp->buffer[56] = dynamic_key[56];
+    temp->buffer[57] = dynamic_key[57];
+    temp->buffer[58] = dynamic_key[58];
+    temp->buffer[59] = dynamic_key[59];
+    temp->buffer[60] = dynamic_key[60];
+    temp->buffer[61] = dynamic_key[61];
+    temp->buffer[62] = dynamic_key[62];
+    temp->buffer[63] = dynamic_key[63];
 
     size_t max_copy = data_len;
     if (max_copy > 20)
         max_copy = 20;
 
     // Copy data bytes
-    if (max_copy >= 1) temp->buffer[16 + 0] = data[0];
-    if (max_copy >= 2) temp->buffer[16 + 1] = data[1];
-    if (max_copy >= 3) temp->buffer[16 + 2] = data[2];
-    if (max_copy >= 4) temp->buffer[16 + 3] = data[3];
-    if (max_copy >= 5) temp->buffer[16 + 4] = data[4];
-    if (max_copy >= 6) temp->buffer[16 + 5] = data[5];
-    if (max_copy >= 7) temp->buffer[16 + 6] = data[6];
-    if (max_copy >= 8) temp->buffer[16 + 7] = data[7];
-    if (max_copy >= 9) temp->buffer[16 + 8] = data[8];
-    if (max_copy >= 10) temp->buffer[16 + 9] = data[9];
-    if (max_copy >= 11) temp->buffer[16 + 10] = data[10];
-    if (max_copy >= 12) temp->buffer[16 + 11] = data[11];
-    if (max_copy >= 13) temp->buffer[16 + 12] = data[12];
-    if (max_copy >= 14) temp->buffer[16 + 13] = data[13];
-    if (max_copy >= 15) temp->buffer[16 + 14] = data[14];
-    if (max_copy >= 16) temp->buffer[16 + 15] = data[15];
-    if (max_copy >= 17) temp->buffer[16 + 16] = data[16];
-    if (max_copy >= 18) temp->buffer[16 + 17] = data[17];
-    if (max_copy >= 19) temp->buffer[16 + 18] = data[18];
-    if (max_copy >= 20) temp->buffer[16 + 19] = data[19];
+    if (max_copy >= 1) temp->buffer[64 + 0] = data[0];
+    if (max_copy >= 2) temp->buffer[64 + 1] = data[1];
+    if (max_copy >= 3) temp->buffer[64 + 2] = data[2];
+    if (max_copy >= 4) temp->buffer[64 + 3] = data[3];
+    if (max_copy >= 5) temp->buffer[64 + 4] = data[4];
+    if (max_copy >= 6) temp->buffer[64 + 5] = data[5];
+    if (max_copy >= 7) temp->buffer[64 + 6] = data[6];
+    if (max_copy >= 8) temp->buffer[64 + 7] = data[7];
+    if (max_copy >= 9) temp->buffer[64 + 8] = data[8];
+    if (max_copy >= 10) temp->buffer[64 + 9] = data[9];
+    if (max_copy >= 11) temp->buffer[64 + 10] = data[10];
+    if (max_copy >= 12) temp->buffer[64 + 11] = data[11];
+    if (max_copy >= 13) temp->buffer[64 + 12] = data[12];
+    if (max_copy >= 14) temp->buffer[64 + 13] = data[13];
+    if (max_copy >= 15) temp->buffer[64 + 14] = data[14];
+    if (max_copy >= 16) temp->buffer[64 + 15] = data[15];
+    if (max_copy >= 17) temp->buffer[64 + 16] = data[16];
+    if (max_copy >= 18) temp->buffer[64 + 17] = data[17];
+    if (max_copy >= 19) temp->buffer[64 + 18] = data[18];
+    if (max_copy >= 20) temp->buffer[64 + 19] = data[19];
 
     sha256_init();
-    sha256_update(temp->buffer, 16 + max_copy);
+    sha256_update(temp->buffer, 64 + max_copy);
     sha256_final(hash);
 
     return 0;

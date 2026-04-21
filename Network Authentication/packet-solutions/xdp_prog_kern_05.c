@@ -155,9 +155,9 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         if (debug)
             bpf_printk("Using kfunc SHA256 for verification\n");
 
-        ret = bpf_sha256_keyed_hash(dynamic_key, 16,
+        ret = bpf_sha256_keyed_hash(dynamic_key, 64,
                                    (const __u8 *)&verify_ctx->original_header,
-                                   sizeof(struct iphdr), 
+                                   sizeof(struct iphdr),
                                    verify_ctx->computed_hash);
     }
     #if 1
@@ -176,10 +176,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
                                    sizeof(struct iphdr)); 
 
         #if 0
-        ret = compute_chacha20_keyed_hash(dynamic_key, 16,
+        ret = compute_chacha20_keyed_hash(dynamic_key, 64,
                                           hdr_copy, header_size,
                                    //(const __u8 *)&verify_ctx->original_header,
-                                   //sizeof(struct iphdr), 
+                                   //sizeof(struct iphdr),
                                    verify_ctx->computed_hash);
         #endif
         ret = bpf_chacha20poly1305_auth(dynamic_key, 16,
@@ -335,8 +335,8 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
         struct iphdr *header_copy = (struct iphdr *)(headers_copy + ETHERNET_HEADER_SIZE);
         header_copy->check = 0;
 
-        ret = bpf_sha256_keyed_hash(dynamic_key, 16, 
-                                    (const __u8 *)header_copy, sizeof(*header_copy), 
+        ret = bpf_sha256_keyed_hash(dynamic_key, 64,
+                                    (const __u8 *)header_copy, sizeof(*header_copy),
                                     hash_ctx->hash_output);
         if (ret == 0) {
             if (debug)
@@ -639,7 +639,7 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
             if (debug)
                 bpf_printk("Using kfunc SHA256 for verification\n");
 
-            ret = bpf_sha256_keyed_hash(auth_data->key, 16,
+            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
                            (BYTE *)iphdr,
                            header_size,
                            hash_result);
