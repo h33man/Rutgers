@@ -160,7 +160,6 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
                                    sizeof(struct iphdr),
                                    verify_ctx->computed_hash);
     }
-    #if 1
     else if (config_ctx->use_kfunc == 2) {
         // Use custom CHACHA20-POLY1305 implementation
         if (debug)
@@ -175,51 +174,11 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
                                    sizeof(struct iphdr)); 
 
-        #if 0
-        ret = compute_chacha20_keyed_hash(dynamic_key, 64,
-                                          hdr_copy, header_size,
-                                   //(const __u8 *)&verify_ctx->original_header,
-                                   //sizeof(struct iphdr),
-                                   verify_ctx->computed_hash);
-        #endif
         ret = bpf_chacha20poly1305_auth(dynamic_key, 16,
                                         hdr_copy, sizeof(struct iphdr),
                                         verify_ctx->computed_hash);
 
     }
-    #else
-    else if (config_ctx->use_kfunc == 2) {
-        if(debug)
-            bpf_printk("Using custom CHACHA20-POLY1305 for verification\n");
-
-        /* Reconstruct the header the sender hashed:
-         * - base IP header only (20 bytes)
-         * - ihl=5 (no options)
-         * - tot_len adjusted
-         * - check=0
-         * This must exactly match what tc_prog_kern_02.c hashed */
-        __u8 hdr_copy[20] = {};
-        __builtin_memcpy(hdr_copy,
-                         (const __u8 *)&verify_ctx->original_header,
-                         sizeof(struct iphdr));   /* already 20 bytes, ihl=5, check=0 */
-
-        /* Use the nonce from the received hash to reproduce the tag */
-        ret = verify_chacha20_keyed_hash(dynamic_key, 16,
-                                         hdr_copy, sizeof(struct iphdr),
-                                         verify_ctx->extracted_hash,   /* contains nonce */
-                                         verify_ctx->computed_hash);
-
-        /* The existing hash_match loop compares all 32 bytes.
-         * Because the kfunc zero-pads bytes 16-31 on both sides, the
-         * comparison is still correct – the zeros will match. */
-
-        if (!ret) {
-            if (debug)
-                bpf_printk("Hash verification PASSED with dynamic key\n");
-            return 0;
-        }
-    }
-    #endif
     else {
         bpf_printk("Invalid option for hash\n");
     }
@@ -230,13 +189,6 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         return -1;
     }
 
-    if(debug) {
-        bpf_printk("CHACHA220 hash recieved: ");
-        print_hex(verify_ctx->extracted_hash, 32);
-        bpf_printk("CHACHA220 hash computed: ");
-        print_hex(verify_ctx->computed_hash, 32);
-    }
-
     int hash_match = 1;
     #pragma unroll
     for (int k = 0; k < 32; k++) {
@@ -245,6 +197,13 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
             hash_match = 0;
             break;
         }
+    }
+
+    if(debug) {
+        bpf_printk("Hash recieved: ");
+        print_hex(verify_ctx->extracted_hash, 32);
+        bpf_printk("Hash computed: ");
+        print_hex(verify_ctx->computed_hash, 32);
     }
 
     if (hash_match) {
