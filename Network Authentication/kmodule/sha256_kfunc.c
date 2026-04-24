@@ -37,16 +37,16 @@ MODULE_DESCRIPTION("SHA256 kfunc for eBPF programs - Final Version");
 MODULE_VERSION("1.0");
 
 /*************************** TYPES ***************************/
-typedef unsigned char BYTE;
-typedef unsigned int WORD;
+typedef unsigned char u8;
 
-#define SHA256_BLOCK_SIZE 32
+
+#define BPF_SHA256_BLOCK_SIZE 32
 
 struct bpf_sha256_ctx {
-    BYTE data[64];
-    WORD datalen;
+    u8 data[64];
+    u32 datalen;
     unsigned long long bitlen;
-    WORD state[8];
+    u32 state[8];
 };
 
 /****************************** MACROS ******************************/
@@ -59,7 +59,7 @@ struct bpf_sha256_ctx {
 #define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
 
 /**************************** VARIABLES *****************************/
-static const WORD k[64] = {
+static const u32 k[64] = {
     0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
     0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
     0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
@@ -72,17 +72,17 @@ static const WORD k[64] = {
 
 /*********************** FUNCTION PROTOTYPES ***********************/
 // Internal SHA256 functions
-static void sha256_transform(struct bpf_sha256_ctx *ctx, const BYTE data[]);
-static void sha256_init(struct bpf_sha256_ctx *ctx);
-static int sha256_update(struct bpf_sha256_ctx *ctx, const BYTE data[], size_t len);
-static int sha256_final(struct bpf_sha256_ctx *ctx, BYTE hash[]);
+static void sha256_transform(struct bpf_sha256_ctx *ctx, const u8 data[]);
+static void bpf_sha256_init(struct bpf_sha256_ctx *ctx);
+static int bpf_sha256_update(struct bpf_sha256_ctx *ctx, const u8 data[], size_t len);
+static int bpf_sha256_final(struct bpf_sha256_ctx *ctx, u8 hash[]);
 
 #if KFUNC_SUPPORTED
 // kfunc prototypes (to suppress -Wmissing-prototypes warnings)
 __bpf_kfunc struct bpf_sha256_ctx *bpf_sha256_ctx_create(void);
 __bpf_kfunc void bpf_sha256_ctx_release(struct bpf_sha256_ctx *ctx);
-__bpf_kfunc int bpf_sha256_update(struct bpf_sha256_ctx *ctx, const __u8 *data, __u32 len);
-__bpf_kfunc int bpf_sha256_final(struct bpf_sha256_ctx *ctx, __u8 *hash);
+__bpf_kfunc int bpf_bpf_sha256_update(struct bpf_sha256_ctx *ctx, const __u8 *data, __u32 len);
+__bpf_kfunc int bpf_bpf_sha256_final(struct bpf_sha256_ctx *ctx, __u8 *hash);
 __bpf_kfunc int bpf_sha256_oneshot(const __u8 *data, __u32 len, __u8 *hash);
 __bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
                                       const __u8 *data, __u32 data_len, 
@@ -90,9 +90,9 @@ __bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
 #endif
 
 /*********************** CORE SHA256 IMPLEMENTATION ***********************/
-static void sha256_transform(struct bpf_sha256_ctx *ctx, const BYTE data[])
+static void sha256_transform(struct bpf_sha256_ctx *ctx, const u8 data[])
 {
-    WORD a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
+    u32 a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
     for (i = 0, j = 0; i < 16; ++i, j += 4)
         m[i] = (data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3]);
@@ -113,7 +113,7 @@ static void sha256_transform(struct bpf_sha256_ctx *ctx, const BYTE data[])
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
 }
 
-static void sha256_init(struct bpf_sha256_ctx *ctx)
+static void bpf_sha256_init(struct bpf_sha256_ctx *ctx)
 {
     ctx->datalen = 0; ctx->bitlen = 0;
     ctx->state[0] = 0x6a09e667; ctx->state[1] = 0xbb67ae85;
@@ -122,9 +122,9 @@ static void sha256_init(struct bpf_sha256_ctx *ctx)
     ctx->state[6] = 0x1f83d9ab; ctx->state[7] = 0x5be0cd19;
 }
 
-static int sha256_update(struct bpf_sha256_ctx *ctx, const BYTE data[], size_t len)
+static int bpf_sha256_update(struct bpf_sha256_ctx *ctx, const u8 data[], size_t len)
 {
-    WORD i;
+    u32 i;
     for (i = 0; i < len; ++i) {
         ctx->data[ctx->datalen] = data[i];
         if (++ctx->datalen == 64) {
@@ -136,9 +136,9 @@ static int sha256_update(struct bpf_sha256_ctx *ctx, const BYTE data[], size_t l
     return 0;
 }
 
-static int sha256_final(struct bpf_sha256_ctx *ctx, BYTE hash[])
+static int bpf_sha256_final(struct bpf_sha256_ctx *ctx, u8 hash[])
 {
-    WORD i = ctx->datalen;
+    u32 i = ctx->datalen;
 
     if (ctx->datalen < 56) {
         ctx->data[i++] = 0x80;
@@ -177,7 +177,7 @@ static int sha256_final(struct bpf_sha256_ctx *ctx, BYTE hash[])
 __bpf_kfunc struct bpf_sha256_ctx *bpf_sha256_ctx_create(void)
 {
     struct bpf_sha256_ctx *ctx = kmalloc(sizeof(*ctx), GFP_KERNEL);
-    if (ctx) sha256_init(ctx);
+    if (ctx) bpf_sha256_init(ctx);
     return ctx;
 }
 
@@ -186,23 +186,23 @@ __bpf_kfunc void bpf_sha256_ctx_release(struct bpf_sha256_ctx *ctx)
     if (ctx) kfree(ctx);
 }
 
-__bpf_kfunc int bpf_sha256_update(struct bpf_sha256_ctx *ctx, const __u8 *data, __u32 len)
+__bpf_kfunc int bpf_bpf_sha256_update(struct bpf_sha256_ctx *ctx, const __u8 *data, __u32 len)
 {
-    return (!ctx || !data) ? -EINVAL : sha256_update(ctx, data, len);
+    return (!ctx || !data) ? -EINVAL : bpf_sha256_update(ctx, data, len);
 }
 
-__bpf_kfunc int bpf_sha256_final(struct bpf_sha256_ctx *ctx, __u8 *hash)
+__bpf_kfunc int bpf_bpf_sha256_final(struct bpf_sha256_ctx *ctx, __u8 *hash)
 {
-    return (!ctx || !hash) ? -EINVAL : sha256_final(ctx, hash);
+    return (!ctx || !hash) ? -EINVAL : bpf_sha256_final(ctx, hash);
 }
 
 __bpf_kfunc int bpf_sha256_oneshot(const __u8 *data, __u32 len, __u8 *hash)
 {
     struct bpf_sha256_ctx ctx;
     if (!data || !hash) return -EINVAL;
-    sha256_init(&ctx);
-    sha256_update(&ctx, data, len);
-    return sha256_final(&ctx, hash);
+    bpf_sha256_init(&ctx);
+    bpf_sha256_update(&ctx, data, len);
+    return bpf_sha256_final(&ctx, hash);
 }
 
 __bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
@@ -214,29 +214,30 @@ __bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
     if (!key || !data || !hash)
         return -EINVAL;
     
-    sha256_init(&ctx);
+    bpf_sha256_init(&ctx);
     
     // Hash key first, then data (simple keyed hash, not full HMAC)
-    ret = sha256_update(&ctx, key, key_len);
+    ret = bpf_sha256_update(&ctx, key, key_len);
     if (ret)
         return ret;
         
-    ret = sha256_update(&ctx, data, data_len);
+    ret = bpf_sha256_update(&ctx, data, data_len);
     if (ret)
         return ret;
         
-    return sha256_final(&ctx, hash);
+    return bpf_sha256_final(&ctx, hash);
 }
 
 /* BTF registration */
-BTF_SET8_START(sha256_kfunc_ids)
+//BTF_SET8_START(sha256_kfunc_ids)
+BTF_KFUNCS_START(sha256_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_sha256_ctx_create, KF_ACQUIRE | KF_RET_NULL | KF_SLEEPABLE)
 BTF_ID_FLAGS(func, bpf_sha256_ctx_release, KF_RELEASE)
-BTF_ID_FLAGS(func, bpf_sha256_update, KF_TRUSTED_ARGS)
-BTF_ID_FLAGS(func, bpf_sha256_final, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_bpf_sha256_update, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_bpf_sha256_final, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_sha256_oneshot, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_sha256_keyed_hash, KF_TRUSTED_ARGS)
-BTF_SET8_END(sha256_kfunc_ids)
+BTF_KFUNCS_END(sha256_kfunc_ids)
 
 static const struct btf_kfunc_id_set sha256_kfunc_set = {
     .owner = THIS_MODULE,

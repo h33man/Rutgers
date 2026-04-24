@@ -23,7 +23,7 @@
 #include <linux/btf_ids.h>
 #include <linux/string.h>
 #include <linux/types.h>
-#include <asm/unaligned.h>   /* get_unaligned_le32, put_unaligned_le32 */
+#include <linux/unaligned.h>   /* get_unaligned_le32, put_unaligned_le32 */
 
 /*
  * Do NOT include <crypto/chacha.h> — it pulls in struct chacha_ctx and
@@ -157,7 +157,7 @@ static void chacha20_init_state(u32 state[CHACHA_STATE_WORDS],
 #define POLY1305_KEY_SIZE    32u
 #define POLY1305_BLOCK_SIZE  16u
 #define POLY1305_TAG_SIZE    16u
-#define SHA256_BLOCK_SIZE    32u
+#define BPF_SHA256_BLOCK_SIZE    32u
 
 struct poly1305_state {
     u64 h[5];   /* accumulator, 5 × 26-bit limbs */
@@ -342,7 +342,7 @@ __bpf_kfunc_start_defs();
  * @key__sz:  byte length of @key
  * @data:     message to authenticate
  * @data__sz: byte length of @data
- * @out:      output buffer, exactly SHA256_BLOCK_SIZE (32) bytes:
+ * @out:      output buffer, exactly BPF_SHA256_BLOCK_SIZE (32) bytes:
  *              out[0..15]  = Poly1305 tag
  *              out[16..31] = zero-padded
  *
@@ -386,7 +386,7 @@ __bpf_kfunc int bpf_chacha20poly1305_auth(const u8 *key,  u32 key__sz,
     memzero_explicit(key32, sizeof(key32));
 
     memcpy(out, tag, POLY1305_TAG_SIZE);
-    memset(out + POLY1305_TAG_SIZE, 0, SHA256_BLOCK_SIZE - POLY1305_TAG_SIZE);
+    memset(out + POLY1305_TAG_SIZE, 0, BPF_SHA256_BLOCK_SIZE - POLY1305_TAG_SIZE);
     /* OPT: removed memzero_explicit(tag) */
     return 0;
 }
@@ -396,9 +396,11 @@ __bpf_kfunc_end_defs();
 /* ==================================================================
  * Registration
  * ================================================================== */
-BTF_SET8_START(chacha20poly1305_kfunc_ids)
+//BTF_SET8_START(chacha20poly1305_kfunc_ids)
+BTF_KFUNCS_START(chacha20poly1305_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_chacha20poly1305_auth, KF_TRUSTED_ARGS)
-BTF_SET8_END(chacha20poly1305_kfunc_ids)
+//BTF_SET8_END(chacha20poly1305_kfunc_ids)
+BTF_KFUNCS_END(chacha20poly1305_kfunc_ids)
 
 static const struct btf_kfunc_id_set chacha20poly1305_kfunc_set = {
     .owner = THIS_MODULE,
