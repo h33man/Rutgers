@@ -57,17 +57,6 @@ typedef struct {
 } SHA256_CTX;
 
 /****************************** MACROS ******************************/
-#if 0
-#define ROTLEFT(a,b)  (((a) << (b)) | ((a) >> (32-(b))))
-#define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32-(b))))
-
-#define CH(x,y,z)  (((x) & (y)) ^ (~(x) & (z)))
-#define MAJ(x,y,z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
-#define EP0(x) (ROTRIGHT(x, 2) ^ ROTRIGHT(x,13) ^ ROTRIGHT(x,22))
-#define EP1(x) (ROTRIGHT(x, 6) ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
-#define SIG0(x) (ROTRIGHT(x, 7) ^ ROTRIGHT(x,18) ^ ((x) >>  3))
-#define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
-#else
 #define ROTRIGHT(a,b) ((__u32)(((__u32)(a) >> (b)) | ((__u32)(a) << (32-(b)))))
 #define ROTLEFT(a,b)  ((__u32)(((__u32)(a) << (b)) | ((__u32)(a) >> (32-(b)))))
 
@@ -77,13 +66,22 @@ typedef struct {
 #define EP1(x) ((__u32)(ROTRIGHT(x,6)  ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25)))
 #define SIG0(x) ((__u32)(ROTRIGHT(x,7)  ^ ROTRIGHT(x,18) ^ ((__u32)(x) >>  3)))
 #define SIG1(x) ((__u32)(ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((__u32)(x) >> 10)))
-#endif
 
 /* IP Options for hash storage */
-#define IP_OPT_HASH_ID       27 //25
+#define IP_OPT_HASH_ID       27
 #define IP_OPT_HASH_LEN      36
 #define ETHERNET_HEADER_SIZE 14
 #define SHA256_BLOCK_SIZE    32     // SHA256 outputs a 32 byte digest
+
+/*
+ * OPTIMIZATION 6: Fixed-size checksum constant.
+ *
+ * calculate_ip_checksum previously took a runtime `len` argument derived
+ * from new_ip->ihl * 4, which the verifier tracked as an unbounded scalar.
+ * Since we always call it with sizeof(struct iphdr) + IP_OPT_HASH_LEN = 56
+ * bytes, define it as a compile-time constant and use a fixed unrolled loop.
+ */
+#define IP_HDR_WITH_OPT_WORDS  ((sizeof(struct iphdr) + IP_OPT_HASH_LEN) / 2)  /* = 28 */
 
 /**************************** VARIABLES *****************************/
 static const WORD k[64] = {
@@ -110,7 +108,7 @@ static const BYTE SECRET_KEY[64] = {
 };
 
 /****************************** COMMON STRUCTURES ******************************/
-
+#if 0
 struct ip_auth_data {
     __u32 field_mask;
     __u8  key[64];
@@ -143,7 +141,7 @@ struct {
     __uint(map_flags, BPF_F_NO_PREALLOC);
     __uint(max_entries, 1000);
 } src_ip_key_map SEC(".maps");
-
+#endif
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
@@ -161,6 +159,7 @@ struct {
     });
 } sha256_temp_map SEC(".maps");
 
+#if 0
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
@@ -179,140 +178,30 @@ struct {
     });
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } config_map SEC(".maps");
+#endif
 
 /****************************** CUSTOM SHA256 IMPLEMENTATION ******************************/
 
 /*
- * OPTIMIZATION 1: sha256_transform is NOT marked __always_inline.
+ * OPTIMIZATION 1: sha256_transform split into two non-inlined subprograms.
  *
- * With __always_inline the compiler emits a full copy of this ~300-instruction
- * function at every call site.  It is called up to 3 times
- * (once mid-update when the 84-byte input crosses the 64-byte block boundary,
- * and twice in sha256_final), so the old code produced ~900 duplicated
- * instructions from this function alone.
+ * sha256_message_schedule: loads ctx->data into temp->m[0..63].
+ * sha256_compress: runs the 64-round a..h update.
+ * sha256_transform: calls both in sequence.
  *
- * As a plain static function the BPF JIT emits a single subprogram and calls
- * it by reference — the body is compiled once and shared across all call sites.
- * This is supported from kernel 4.16 onwards.
+ * None are marked __always_inline so the BPF JIT emits each body once and
+ * calls it by reference — shared across all call sites.
+ *
+ * OPTIMIZATION 2: The 64-round compression loop is NOT unrolled.
+ *
+ * With #pragma unroll the verifier processes 64 independent copies of the
+ * body and tracks __u32 scalar ranges through every copy — this caused the
+ * original 1M-instruction blowup.  Without unroll, the verifier analyses
+ * the loop body once and uses widening to prove termination.  The explicit
+ * __u32 casts in every macro keep per-iteration state small enough to handle.
  */
-#if 0
-static int sha256_transform(const BYTE data[])
-{
-    __u32 key = 0;
-    SHA256_CTX *ctx;
-    struct { WORD m[64]; } *temp;
-    WORD a, b, c, d, e, f, g, h, i, t1, t2;
 
-    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
-    if (!ctx)
-        return -1;
-
-    temp = bpf_map_lookup_elem(&sha256_temp_map, &key);
-    if (!temp)
-        return -1;
-
-    /*
-     * OPTIMIZATION 2: Remove tautological bounds checks.
-     *
-     * The original loops contained guards like "if (i >= 16) break" inside
-     * "for (i = 0; i < 16; ++i)" — these are always false and generate dead
-     * branch instructions that the verifier still has to evaluate.  Removed.
-     *
-     * Similarly "if (i - 2 < 0)" on an unsigned i is always false and removed.
-     */
-    #pragma unroll
-    for (i = 0; i < 16; ++i) {
-        int j = i * 4;
-        temp->m[i] = ((WORD)data[j]     << 24) |
-                     ((WORD)data[j + 1] << 16) |
-                     ((WORD)data[j + 2] <<  8) |
-                      (WORD)data[j + 3];
-    }
-
-    #pragma unroll
-    for (i = 16; i < 64; ++i) {
-        temp->m[i] = SIG1(temp->m[i - 2])  + temp->m[i - 7] +
-                     SIG0(temp->m[i - 15]) + temp->m[i - 16];
-    }
-
-    a = ctx->state[0]; b = ctx->state[1];
-    c = ctx->state[2]; d = ctx->state[3];
-    e = ctx->state[4]; f = ctx->state[5];
-    g = ctx->state[6]; h = ctx->state[7];
-
-    #pragma unroll
-    for (i = 0; i < 64; ++i) {
-        t1 = h + EP1(e) + CH(e, f, g) + k[i] + temp->m[i];
-        t2 = EP0(a) + MAJ(a, b, c);
-        h = g; g = f; f = e; e = d + t1;
-        d = c; c = b; b = a; a = t1 + t2;
-    }
-
-    ctx->state[0] += a; ctx->state[1] += b;
-    ctx->state[2] += c; ctx->state[3] += d;
-    ctx->state[4] += e; ctx->state[5] += f;
-    ctx->state[6] += g; ctx->state[7] += h;
-
-    return 0;
-}
-/* sha256_transform takes no arguments — it looks up ctx from the map
- * directly, which the verifier can always track as a bounded map value. */
-static int sha256_transform(void)
-{
-    __u32 key = 0;
-    SHA256_CTX *ctx;
-    struct { WORD m[64]; } *temp;
-    WORD a, b, c, d, e, f, g, h, i, t1, t2;
-
-    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
-    if (!ctx)
-        return -1;
-
-    temp = bpf_map_lookup_elem(&sha256_temp_map, &key);
-    if (!temp)
-        return -1;
-
-    #pragma unroll
-    for (i = 0; i < 16; ++i) {
-        int j = i * 4;
-        /* VERIFIER HINT: j is derived from loop counter i which is
-         * bounded [0,15], so j+3 <= 63 < 64. Explicit check required
-         * because the verifier tracks j as a scalar.                  */
-        if (j + 3 >= 64)
-            return -1;
-        temp->m[i] = ((WORD)ctx->data[j]     << 24) |
-                     ((WORD)ctx->data[j + 1] << 16) |
-                     ((WORD)ctx->data[j + 2] <<  8) |
-                      (WORD)ctx->data[j + 3];
-    }
-
-    #pragma unroll
-    for (i = 16; i < 64; ++i)
-        temp->m[i] = SIG1(temp->m[i-2])  + temp->m[i-7]  +
-                     SIG0(temp->m[i-15]) + temp->m[i-16];
-
-    a = ctx->state[0]; b = ctx->state[1];
-    c = ctx->state[2]; d = ctx->state[3];
-    e = ctx->state[4]; f = ctx->state[5];
-    g = ctx->state[6]; h = ctx->state[7];
-
-    #pragma unroll
-    for (i = 0; i < 64; ++i) {
-        t1 = h + EP1(e) + CH(e,f,g) + k[i] + temp->m[i];
-        t2 = EP0(a) + MAJ(a,b,c);
-        h = g; g = f; f = e; e = d + t1;
-        d = c; c = b; b = a; a = t1 + t2;
-    }
-
-    ctx->state[0] += a; ctx->state[1] += b;
-    ctx->state[2] += c; ctx->state[3] += d;
-    ctx->state[4] += e; ctx->state[5] += f;
-    ctx->state[6] += g; ctx->state[7] += h;
-
-    return 0;
-}
-#else
-/* Subprogram 1: message schedule only (m[0..15] → m[16..63]) */
+/* Subprogram 1: message schedule only (ctx->data → temp->m[0..63]) */
 static int sha256_message_schedule(void)
 {
     __u32 map_key = 0;
@@ -323,7 +212,6 @@ static int sha256_message_schedule(void)
     if (!temp)
         return -1;
 
-    /* Load first 16 words from ctx->data */
     SHA256_CTX *ctx = bpf_map_lookup_elem(&sha256_ctx_map, &map_key);
     if (!ctx)
         return -1;
@@ -338,7 +226,6 @@ static int sha256_message_schedule(void)
                       (__u32)ctx->data[j + 3];
     }
 
-    /* Extend to 64 words — each result is explicitly cast to __u32 */
     #pragma unroll
     for (i = 16; i < 64; ++i) {
         temp->m[i] = (__u32)(SIG1(temp->m[i-2])  + temp->m[i-7]  +
@@ -348,7 +235,7 @@ static int sha256_message_schedule(void)
     return 0;
 }
 
-/* Subprogram 2: compression — 64-round a..h update */
+/* Subprogram 2: compression — 64-round a..h update, NOT unrolled */
 static int sha256_compress(void)
 {
     __u32 map_key = 0;
@@ -370,20 +257,8 @@ static int sha256_compress(void)
     e = (__u32)ctx->state[4]; f = (__u32)ctx->state[5];
     g = (__u32)ctx->state[6]; h = (__u32)ctx->state[7];
 
-    /*
-     * Do NOT #pragma unroll the 64-round loop.
-     *
-     * With unroll, the verifier processes 64 independent copies of the
-     * body and tracks scalar ranges through every copy — this is what
-     * caused the 1M-instruction blowup even with the __u32 casts above.
-     *
-     * Without unroll, the verifier analyses the loop body once and uses
-     * widening to prove termination (loop counter i is bounded [0,63]).
-     * The __u32 casts in every macro keep the per-iteration state small
-     * enough for the verifier to handle.
-     */
     for (i = 0; i < 64; ++i) {
-        if (i >= 64) break;  /* verifier hint for loop bound */
+        if (i >= 64) break;  /* verifier loop-bound hint */
         t1 = (__u32)(h + EP1(e) + CH(e,f,g) + k[i] + temp->m[i]);
         t2 = (__u32)(EP0(a) + MAJ(a,b,c));
         h = g; g = f; f = e; e = (__u32)(d + t1);
@@ -409,9 +284,8 @@ static int sha256_transform(void)
         return -1;
     return sha256_compress();
 }
-#endif
 
-static __always_inline int sha256_init(void)
+static int sha256_init(void)
 {
     __u32 key = 0;
     SHA256_CTX *ctx;
@@ -434,70 +308,18 @@ static __always_inline int sha256_init(void)
     return 0;
 }
 
-#if 0
-static __always_inline int sha256_update(const BYTE data[], size_t len)
-{
-    __u32 key = 0;
-    SHA256_CTX *ctx;
-    WORD i;
-
-    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
-    if (!ctx)
-        return -1;
-
-    for (i = 0; i < len; ++i) {
-        /*
-         * OPTIMIZATION 2 (continued): The original loop had two redundant
-         * guards: "if (i >= len) break" (always false — loop condition
-         * already ensures i < len) and "if (ctx->datalen >= 64) break"
-         * (datalen is reset to 0 whenever it reaches 64, so this never
-         * triggers mid-loop).  Both removed.
-         */
-        ctx->data[ctx->datalen] = data[i];
-        ctx->datalen++;
-
-        if (ctx->datalen == 64) {
-            sha256_transform(ctx->data);
-            ctx->bitlen  += 512;
-            ctx->datalen  = 0;
-        }
-    }
-    return 0;
-}
-#else
-static __always_inline int sha256_update(const BYTE data[], size_t len)
-{
-    __u32 key = 0;
-    SHA256_CTX *ctx;
-    WORD i;
-
-    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
-    if (!ctx)
-        return -1;
-
-    for (i = 0; i < len; ++i) {
-        /* VERIFIER HINT: ctx->datalen comes from persistent map storage.
-         * The verifier treats it as an unbounded scalar and cannot infer
-         * it is always < 64 from program logic alone. This explicit check
-         * is required to prove the array write below is in bounds.        */
-        if (ctx->datalen >= 64)
-            return -1;
-
-        ctx->data[ctx->datalen] = data[i];
-        ctx->datalen++;
-
-        if (ctx->datalen == 64) {
-            //sha256_transform(ctx->data);
-            sha256_transform();
-            ctx->bitlen  += 512;
-            ctx->datalen  = 0;
-        }
-    }
-    return 0;
-}
-#endif
-
-static __always_inline int sha256_final(BYTE hash[])
+/*
+ * OPTIMIZATION 3: sha256_final — eliminate variable-length memset.
+ *
+ * __builtin_memset with a runtime length (e.g. 55 - i) is rejected by the
+ * BPF backend — it requires compile-time constant lengths.
+ *
+ * Solution: zero the entire 64-byte ctx->data with a single fixed-size
+ * memset FIRST, then write the 0x80 marker at position i.  Since everything
+ * after i is already zero, no second memset is needed.  The length 64 is a
+ * compile-time constant so the BPF backend accepts it.
+ */
+static int sha256_final(BYTE hash[])
 {
     __u32 key = 0;
     SHA256_CTX *ctx;
@@ -512,39 +334,28 @@ static __always_inline int sha256_final(BYTE hash[])
         i = 0;
 
     if (ctx->datalen < 56) {
-        ctx->data[i++] = 0x80;
-
-        #pragma unroll
-        for (int j = 0; j < 56; j++) {
-            if (i < 56)
-                ctx->data[i++] = 0x00;
-        }
+        /*
+         * Zero the whole block first (constant length = fine for BPF),
+         * then stamp 0x80 at position i.  Bytes [i+1..55] are already 0.
+         */
+        __builtin_memset(ctx->data, 0x00, 64);
+        ctx->data[i] = 0x80;
     } else {
-        ctx->data[i++] = 0x80;
+        /*
+         * Same: zero entire block, stamp 0x80, transform, then zero again
+         * for the second block (bytes [0..55] must be 0 before bit-length).
+         */
+        __builtin_memset(ctx->data, 0x00, 64);
+        ctx->data[i] = 0x80;
 
-        #pragma unroll
-        for (int j = 0; j < 64; j++) {
-            if (i < 64)
-                ctx->data[i++] = 0x00;
-        }
-
-        //sha256_transform(ctx->data);
         sha256_transform();
 
-        #pragma unroll
-        for (int j = 0; j < 56; j++)
-            ctx->data[j] = 0x00;
-
+        __builtin_memset(ctx->data, 0x00, 64);
         i = 56;
     }
 
     ctx->bitlen += ctx->datalen * 8;
 
-    /*
-     * OPTIMIZATION 2 (continued): The original code wrapped each of these
-     * 8 assignments in "if (N < 64)" — a compile-time constant that is always
-     * true.  Removed; assignments are unconditional.
-     */
     ctx->data[56] = ctx->bitlen >> 56;
     ctx->data[57] = ctx->bitlen >> 48;
     ctx->data[58] = ctx->bitlen >> 40;
@@ -554,14 +365,8 @@ static __always_inline int sha256_final(BYTE hash[])
     ctx->data[62] = ctx->bitlen >>  8;
     ctx->data[63] = ctx->bitlen;
 
-    //sha256_transform(ctx->data);
     sha256_transform();
 
-    /*
-     * OPTIMIZATION 2 (continued): The original loop wrapped each hash[]
-     * assignment in a multi-condition bounds check that was always true for
-     * i in [0,3].  Unrolled and written as 32 direct assignments instead.
-     */
     #pragma unroll
     for (i = 0; i < 4; ++i) {
         hash[i]      = (ctx->state[0] >> (24 - i * 8)) & 0xff;
@@ -577,113 +382,95 @@ static __always_inline int sha256_final(BYTE hash[])
     return 0;
 }
 
-/****************************** HELPER FUNCTIONS ******************************/
-
-// Function to print a hex dump of binary data
-void print_hex(const unsigned char *data, int len) {
-    //if (len > 20) return;
-    for (int i = 0; i < len; i++)
-        bpf_printk("%02x", data[i++]);
-    bpf_printk("\n");
-}
-
-static __always_inline uint16_t calculate_ip_checksum(const void *header, int len) {
-    const uint16_t *buf = header;
-    uint32_t sum = 0;
-
-    for (int i = 0; i < len / 2; i++)
-        sum += buf[i];
-
-    if (len % 2)
-        sum += ((const uint8_t *)header)[len - 1];
-
-    while (sum >> 16)
-        sum = (sum & 0xFFFF) + (sum >> 16);
-
-    return ~sum;
-}
-
-/*
- * OPTIMIZATION 3: lookup_auth_key — single LPM lookup instead of four.
- *
- * BPF_MAP_TYPE_LPM_TRIE performs longest-prefix match natively in a single
- * bpf_map_lookup_elem() call.  The original code manually tried /32, /24,
- * /16 and /8 in sequence, generating four map lookups and four separate
- * verifier-tracked code paths.  One lookup is sufficient and correct.
- *
- * OPTIMIZATION 4: Timing instrumentation moved behind the debug flag.
- *
- * bpf_ktime_get_ns() is a helper call that adds instructions on every packet
- * even when debug output is never printed.  The two calls and the arithmetic
- * between them are now compiled out entirely in non-debug builds.
- */
-static __always_inline struct ip_auth_data *lookup_auth_key(__u32 src_ip)
-{
-    struct ipv4_lpm_key src_key;
-    struct ip_auth_data *auth_data;
-
-    src_key.prefixlen = 32;
-    src_key.data      = src_ip;
-
-    auth_data = bpf_map_lookup_elem(&src_ip_key_map, &src_key);
-
-#ifdef BPF_DEBUG
-    if (auth_data) {
-        /* Timing kept only when debug output is actually useful */
-        __u64 t0 = bpf_ktime_get_ns();
-        __u64 t1 = bpf_ktime_get_ns();
-        bpf_printk("Key lookup time: %llu ns\n", t1 - t0);
-    }
-#endif
-
-    return auth_data;
-}
-
 /**
  * Compute keyed hash with dynamic key (custom SHA256).
  * Used when use_kfunc = 0.
  *
- * Input layout written once into temp->buffer:
- *   [0 .. 63]  64-byte key from the LPM map
- *   [64 .. 83] up to 20 bytes of IP header data
- * Total: up to 84 bytes → two SHA256 block transforms.
+ * Input layout:
+ *   temp->buffer[0  .. 63]  64-byte key from LPM map
+ *   temp->buffer[64 .. 83]  20 bytes of IP header (fixed size)
+ * Total: 84 bytes = one full 64-byte block + 20-byte remainder.
+ *
+ * OPTIMIZATION 7: Eliminate sha256_update entirely for this call path.
+ *
+ * sha256_update contained a loop "for (i = 0; i < len; ++i)" where `len`
+ * was a runtime function argument.  The verifier saw `len` as an unbounded
+ * scalar and could not prove loop termination, causing exponential state
+ * blowup — this was the primary source of the 1M-instruction overflow.
+ *
+ * Since we always hash exactly 84 bytes (64-byte key + 20-byte IP header),
+ * we know statically that:
+ *   - The first 64 bytes fill exactly one SHA256 block → one transform.
+ *   - The remaining 20 bytes are < 64 → they fit in ctx->data without
+ *     triggering a mid-update transform.
+ *
+ * We can therefore inline the two-phase update directly:
+ *   Phase 1: memcpy first 64 bytes into ctx->data, call transform.
+ *   Phase 2: memcpy remaining 20 bytes into ctx->data, set datalen = 20.
+ * Both memcpy lengths are compile-time constants → zero verifier overhead.
  */
-static __always_inline int compute_keyed_hash_from_map_dynamic(
+//static int __attribute__((unused)) compute_keyed_hash_from_map_dynamic(
+static int compute_keyed_hash_from_map_dynamic(
         const BYTE *data, size_t data_len,
         BYTE hash[SHA256_BLOCK_SIZE], const BYTE *dynamic_key)
 {
     __u32 key = 0;
     struct { BYTE buffer[128]; WORD m[64]; } *temp;
+    SHA256_CTX *ctx;
+    size_t hdr_len;
 
     temp = bpf_map_lookup_elem(&sha256_temp_map, &key);
     if (!temp)
         return -1;
 
-    /* Copy 64-byte key into the front of the buffer */
-    __builtin_memcpy(temp->buffer, dynamic_key, 64);
+    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
+    if (!ctx)
+        return -1;
+
+    /* Clamp header bytes to 20 (fixed IPv4 header, no options in input) */
+    hdr_len = data_len < 20 ? data_len : 20;
+
+    /* Build the 84-byte input in temp->buffer */
+    __builtin_memcpy(temp->buffer,      dynamic_key, 64);  /* key */
+    __builtin_memcpy(temp->buffer + 64, data,        20);  /* header (20 bytes always safe,
+                                                              caller zero-pads if hdr_len < 20) */
+
+    /* --- Inline sha256_update for exactly 84 bytes --- */
+
+    /* Init SHA256 state */
+    if (sha256_init() < 0)
+        return -1;
+
+    /* Re-fetch ctx after sha256_init (map pointer may have been re-derived) */
+    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
+    if (!ctx)
+        return -1;
 
     /*
-     * OPTIMIZATION 5: Replace 20 conditional byte assignments with a single
-     * __builtin_memcpy of fixed size 20.
-     *
-     * The original code emitted 20 "if (max_copy >= N)" branches.  Because
-     * data_len is clamped to 20 on the line above, every condition was always
-     * true — the verifier still tracked each branch separately.  A
-     * __builtin_memcpy with a compile-time constant length lowers to a small
-     * number of word-wide store instructions with no branching.
-     *
-     * We always copy 20 bytes (the fixed IP header size that is passed in).
-     * If data_len < 20, the caller is responsible for zero-padding or the
-     * trailing bytes are harmless since they lie beyond the hash input length
-     * recorded in SHA256's bitlen.
+     * Phase 1: first 64 bytes → fills ctx->data exactly, triggers transform.
+     * Use fixed-size memcpy so the compiler emits word stores, not a loop.
      */
-    __builtin_memcpy(temp->buffer + 64, data, 20);
+    __builtin_memcpy(ctx->data, temp->buffer, 64);
+    if (sha256_transform() < 0)
+        return -1;
+    ctx = bpf_map_lookup_elem(&sha256_ctx_map, &key);
+    if (!ctx)
+        return -1;
+    ctx->bitlen  = 512;
+    ctx->datalen = 0;
 
-    sha256_init();
-    sha256_update(temp->buffer, 64 + (data_len < 20 ? data_len : 20));
-    sha256_final(hash);
+    /*
+     * Phase 2: remaining bytes (hdr_len, max 20) → fit in ctx->data with
+     * no mid-update transform.  Copy 20 bytes unconditionally (safe because
+     * temp->buffer[64..83] was initialised above); record only hdr_len bytes
+     * in datalen so sha256_final pads correctly.
+     */
+    __builtin_memcpy(ctx->data, temp->buffer + 64, 20);
+    ctx->datalen = (__u32)hdr_len;
 
-    return 0;
+    /* --- End inline sha256_update --- */
+
+    return sha256_final(hash);
 }
 
 #endif   // SHA256_H

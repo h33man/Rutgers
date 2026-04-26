@@ -44,8 +44,10 @@ static __always_inline __u32 tc_stats_record_action(struct __sk_buff *ctx, __u32
 
 /****************************** IP OPTION MANIPULATION ******************************/
 
+//static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
+//        struct iphdr *ip_orig, BYTE hash[SHA256_BLOCK_SIZE])
 static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
-        struct iphdr *ip_orig, BYTE hash[SHA256_BLOCK_SIZE])
+                                BYTE hash[SHA256_BLOCK_SIZE])
 {
     void *data_end = (void *)(long)skb->data_end;
     void *data = (void *)(long)skb->data;
@@ -232,17 +234,9 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
                 goto out;
             }
 
-            #if 0
-            ret = compute_chacha20_keyed_hash(auth_data->key, 16,
-                                              hdr_copy, header_size,
-                                              hash_result);
-            #endif
-
             ret = bpf_chacha20poly1305_auth(auth_data->key, 16, 
                                             hdr_copy, header_size, 
                                             hash_result);
-            /* hash_result[0..15]  = Poly1305 tag
-             * hash_result[16..31] = 0 (zero-padded by kfunc) */
 
         } else {
             // Use custom SHA256 implementation
@@ -250,7 +244,8 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
         }
 
         if (ret == 0) {
-            if (add_ip_option_hash_tc(ctx, iphdr, hash_result) < 0) {
+            //if (add_ip_option_hash_tc(ctx, iphdr, hash_result) < 0) 
+            if (add_ip_option_hash_tc(ctx, hash_result) < 0) {
                 action = TC_ACT_OK;
             } else {
                 if (debug)

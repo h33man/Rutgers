@@ -15,6 +15,18 @@
 
 extern __u8 debug;
 
+#include <bpf/bpf_helpers.h>
+
+#if 0
+#include <xdp/xdp_helpers.h>
+
+struct {
+    __uint(priority, 10);
+    __uint(XDP_PASS, 1);
+    __uint(XDP_DROP, 1);
+} XDP_RUN_CONFIG(xdp_ip_hash_verify_func);
+#endif
+
 // Map for verification to avoid stack overflow
 // Extended with use_kfunc flag for runtime selection
 struct {
@@ -141,6 +153,7 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     verify_ctx->original_header.tot_len = bpf_htons(bpf_ntohs(verify_ctx->original_header.tot_len) - options_len);
     verify_ctx->original_header.check = 0;
 
+    #if 1
     int ret = 0;
     if (config_ctx->use_kfunc == 0) {
         // Use custom SHA256 implementation
@@ -214,25 +227,31 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         bpf_printk("Hash verification FAILED with dynamic key\n");
         return -2;
     }
+    #endif
+    return 0;
 }
+#if 1
 
 /****************************** IP OPTION MANIPULATION ******************************/
 
 /**
  * Remove IP option hash from packet
  */
-static __always_inline int remove_ip_option_hash(struct xdp_md *ctx,
-                                                  struct iphdr *ip_orig)
+static __always_inline int remove_ip_option_hash(struct xdp_md *ctx)
+//static __always_inline int remove_ip_option_hash(struct xdp_md *ctx,
+//                                                  struct iphdr *ip_orig)
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
     uint8_t headers_copy[ETHERNET_HEADER_SIZE + sizeof(struct iphdr)];
 
-    if ((void *)data + sizeof(headers_copy) > data_end)
+    //if ((void *)data + sizeof(headers_copy) > data_end)
+    if ((void *)data + IP_OPT_HASH_LEN + sizeof(headers_copy) > data_end)
         return -1;
 
     __builtin_memcpy(headers_copy, data, sizeof(headers_copy));
 
+    #if 1
     if (bpf_xdp_adjust_head(ctx, (int)IP_OPT_HASH_LEN))
         return -1;
 
@@ -252,14 +271,17 @@ static __always_inline int remove_ip_option_hash(struct xdp_md *ctx,
     new_ip->tot_len = bpf_htons(bpf_ntohs(new_ip->tot_len) - IP_OPT_HASH_LEN);
     new_ip->check = 0;
 
-    int header_len = new_ip->ihl * 4;
-    new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
+    //int header_len = new_ip->ihl * 4;
+    //new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
+    new_ip->check = calculate_ip_checksum((const void *)new_ip, sizeof(struct iphdr));
 
     if (debug)
         bpf_printk("Hash option removed, new checksum: 0x%04x\n", new_ip->check);
 
+    #endif
     return 0;
 }
+#endif
 
 /**
  * Add IP option with hash with runtime selection (custom or kfunc)
@@ -405,6 +427,7 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
  * XDP program for hash verification and removal with runtime selection
  */
 SEC("xdp_ip_hash_verify")
+//SEC("xdp.frags/ip_hash_verify")
 int xdp_ip_hash_verify_func(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
@@ -467,7 +490,7 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
                     case ACTION_ALLOW:
                         if (debug)
                             bpf_printk("Action: ALLOW - removing hash option\n");
-                        if (remove_ip_option_hash(ctx, iphdr) == 0) {
+                        if (remove_ip_option_hash(ctx) == 0) {
                             if (debug)
                                 bpf_printk("Hash option removed successfully\n");
                         } else {
@@ -511,6 +534,7 @@ out:
 /**
  * XDP program for adding hash to packets with runtime selection
  */
+//SEC("xdp.frags/ip_hash")
 SEC("xdp_ip_hash")
 int xdp_ip_hash_func(struct xdp_md *ctx)
 {
@@ -592,7 +616,7 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
             bpf_printk("=== Processing packet for hash addition with dynamic key ===\n");
 
         // Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
-        int ret;
+        int ret = 0;
         if (config_ctx->use_kfunc) {
             // Use kernel SHA256 kfunc
             if (debug)
