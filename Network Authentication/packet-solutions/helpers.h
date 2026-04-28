@@ -139,9 +139,63 @@ static __always_inline uint16_t calculate_ip_checksum(const void *header, int le
 
     return (~sum) & 0xFFFF;
 }
+#if 1
+
+/**
+ * Lookup authentication key for source IP using LPM trie
+ */
+static __always_inline struct ip_auth_data* lookup_auth_key(__u32 src_ip) {
+    struct ipv4_lpm_key src_key;
+    struct ip_auth_data *auth_data;
+
+#ifdef BPF_DEBUG
+    __u64 start_time = bpf_ktime_get_ns();
+#endif
+
+    // Try exact match first (32-bit prefix)
+    src_key.prefixlen = 32;
+    src_key.data = src_ip;
+    auth_data = bpf_map_lookup_elem(&src_ip_key_map, &src_key);
+
+    if (auth_data) {
+        goto out;
+    }
+
+    // Try /24 subnet match
+    src_key.prefixlen = 24;
+    src_key.data = src_ip & bpf_htonl(0xFFFFFF00);
+    auth_data = bpf_map_lookup_elem(&src_ip_key_map, &src_key);
+
+    if (auth_data) {
+        goto out;
+    }
+
+    // Try /16 subnet match
+    src_key.prefixlen = 16;
+    src_key.data = src_ip & bpf_htonl(0xFFFF0000);
+    auth_data = bpf_map_lookup_elem(&src_ip_key_map, &src_key);
+
+    if (auth_data) {
+        goto out;
+    }
+
+    // Try /8 subnet match
+    src_key.prefixlen = 8;
+    src_key.data = src_ip & bpf_htonl(0xFF000000);
+    auth_data = bpf_map_lookup_elem(&src_ip_key_map, &src_key);
+
+out:
+#ifdef BPF_DEBUG
+    if (auth_data)
+        bpf_printk("Key lookup time: %llu ns\n", bpf_ktime_get_ns() - start_time);
+#endif
+    
+    return auth_data;
+}
+#else
 
 /*
- * OPTIMIZATION 4: lookup_auth_key — single LPM lookup.
+ * OPTIMIZATION 4: lookup_auth_key - single LPM lookup.
  * OPTIMIZATION 5: Timing instrumentation behind debug flag only.
  */
 static struct ip_auth_data *lookup_auth_key(__u32 src_ip)
@@ -164,5 +218,6 @@ static struct ip_auth_data *lookup_auth_key(__u32 src_ip)
 
     return auth_data;
 }
+#endif
 
 #endif /*__HELPERS_H */

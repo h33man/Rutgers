@@ -13,19 +13,9 @@
 #include "sha256.h"
 #include "chacha20_kfunc.h"
 
-extern __u8 debug;
+//extern __u8 debug;
 
 #include <bpf/bpf_helpers.h>
-
-#if 0
-#include <xdp/xdp_helpers.h>
-
-struct {
-    __uint(priority, 10);
-    __uint(XDP_PASS, 1);
-    __uint(XDP_DROP, 1);
-} XDP_RUN_CONFIG(xdp_ip_hash_verify_func);
-#endif
 
 // Map for verification to avoid stack overflow
 // Extended with use_kfunc flag for runtime selection
@@ -127,8 +117,9 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
                     options[start_pos + 2] == 0x12 &&
                     options[start_pos + 3] == 0x34) {
 
-                    if (debug)
-                        bpf_printk("Found hash option for verification at pos %d\n", start_pos);
+                    #ifdef BPF_DEBUG 
+                    bpf_printk("Found hash option for verification at pos %d\n", start_pos);
+                    #endif
 
                     #pragma unroll
                     for (int j = 0; j < 32; j++) {
@@ -153,30 +144,30 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     verify_ctx->original_header.tot_len = bpf_htons(bpf_ntohs(verify_ctx->original_header.tot_len) - options_len);
     verify_ctx->original_header.check = 0;
 
-    #if 1
     int ret = 0;
     if (config_ctx->use_kfunc == 0) {
         // Use custom SHA256 implementation
-        if (debug)
-            bpf_printk("Using custom SHA256 for verification\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Using custom SHA256 for verification\n");
+        #endif
 
         ret = compute_keyed_hash_from_map_dynamic((BYTE *)&verify_ctx->original_header,
                                             sizeof(struct iphdr), verify_ctx->computed_hash, dynamic_key);
     }
     else if (config_ctx->use_kfunc == 1) {
         // Use kernel SHA256 kfunc
-        if (debug)
-            bpf_printk("Using kfunc SHA256 for verification\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Using kfunc SHA256 for verification\n");
+        #endif
 
-        ret = bpf_sha256_keyed_hash(dynamic_key, 64,
-                                   (const __u8 *)&verify_ctx->original_header,
-                                   sizeof(struct iphdr),
-                                   verify_ctx->computed_hash);
+        ret = bpf_sha256_keyed_hash(dynamic_key, 64, (const __u8 *)&verify_ctx->original_header,
+                                   sizeof(struct iphdr), verify_ctx->computed_hash);
     }
     else if (config_ctx->use_kfunc == 2) {
         // Use custom CHACHA20-POLY1305 implementation
-        if (debug)
-            bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+        #endif
 
         /* Copy to stack buffer - verifier can track bounds on stack */
         __u8 hdr_copy[60] = {};
@@ -187,8 +178,8 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
                                    sizeof(struct iphdr)); 
 
-        ret = bpf_chacha20poly1305_auth(dynamic_key, 16,
-                                        hdr_copy, sizeof(struct iphdr),
+        //ret = bpf_chacha20poly1305_auth(dynamic_key, 16,
+        ret = bpf_chacha20poly1305_auth(dynamic_key, 32, hdr_copy, sizeof(struct iphdr),
                                         verify_ctx->computed_hash);
 
     }
@@ -212,25 +203,25 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         }
     }
 
-    if(debug) {
-        bpf_printk("Hash recieved: ");
-        print_hex(verify_ctx->extracted_hash, 32);
-        bpf_printk("Hash computed: ");
-        print_hex(verify_ctx->computed_hash, 32);
-    }
+    #ifdef BPF_DEBUG 
+    bpf_printk("Hash recieved: ");
+    print_hex(verify_ctx->extracted_hash, 32);
+    bpf_printk("Hash computed: ");
+    print_hex(verify_ctx->computed_hash, 32);
+    #endif
 
     if (hash_match) {
-        if (debug)
-            bpf_printk("Hash verification PASSED with dynamic key\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Hash verification PASSED with dynamic key\n");
+        #endif
         return 0;
     } else {
         bpf_printk("Hash verification FAILED with dynamic key\n");
         return -2;
     }
-    #endif
+    
     return 0;
 }
-#if 1
 
 /****************************** IP OPTION MANIPULATION ******************************/
 
@@ -238,20 +229,16 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
  * Remove IP option hash from packet
  */
 static __always_inline int remove_ip_option_hash(struct xdp_md *ctx)
-//static __always_inline int remove_ip_option_hash(struct xdp_md *ctx,
-//                                                  struct iphdr *ip_orig)
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
     uint8_t headers_copy[ETHERNET_HEADER_SIZE + sizeof(struct iphdr)];
 
-    //if ((void *)data + sizeof(headers_copy) > data_end)
     if ((void *)data + IP_OPT_HASH_LEN + sizeof(headers_copy) > data_end)
         return -1;
 
     __builtin_memcpy(headers_copy, data, sizeof(headers_copy));
 
-    #if 1
     if (bpf_xdp_adjust_head(ctx, (int)IP_OPT_HASH_LEN))
         return -1;
 
@@ -271,17 +258,14 @@ static __always_inline int remove_ip_option_hash(struct xdp_md *ctx)
     new_ip->tot_len = bpf_htons(bpf_ntohs(new_ip->tot_len) - IP_OPT_HASH_LEN);
     new_ip->check = 0;
 
-    //int header_len = new_ip->ihl * 4;
-    //new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
     new_ip->check = calculate_ip_checksum((const void *)new_ip, sizeof(struct iphdr));
 
-    if (debug)
-        bpf_printk("Hash option removed, new checksum: 0x%04x\n", new_ip->check);
-
+    #ifdef BPF_DEBUG 
+    bpf_printk("Hash option removed, new checksum: 0x%04x\n", new_ip->check);
     #endif
+
     return 0;
 }
-#endif
 
 /**
  * Add IP option with hash with runtime selection (custom or kfunc)
@@ -311,17 +295,20 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
     hash_ctx = bpf_map_lookup_elem(&kfunc_hash_map, &key);
     if (hash_ctx) {
         // Try to use kfunc - if available, compute hash using kfunc
-        if (debug)
-            bpf_printk("Attempting to compute hash using kfunc\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Attempting to compute hash using kfunc\n");
+        #endif
+
         struct iphdr *header_copy = (struct iphdr *)(headers_copy + ETHERNET_HEADER_SIZE);
         header_copy->check = 0;
 
-        ret = bpf_sha256_keyed_hash(dynamic_key, 64,
-                                    (const __u8 *)header_copy, sizeof(*header_copy),
+        ret = bpf_sha256_keyed_hash(dynamic_key, 64, (const __u8 *)header_copy, sizeof(*header_copy),
                                     hash_ctx->hash_output);
         if (ret == 0) {
-            if (debug)
-                bpf_printk("Using kfunc SHA256 for hash addition\n");
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using kfunc SHA256 for hash addition\n");
+            #endif
+
             // Use hash computed by kfunc
             if (bpf_xdp_adjust_head(ctx, 0 - (int)IP_OPT_HASH_LEN))
                 return -1;
@@ -364,15 +351,17 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
             int header_len = new_ip->ihl * 4;
             new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
             
-            if (debug)
-                bpf_printk("Hash added successfully (kfunc), new checksum: 0x%04x\n", new_ip->check);
+            #ifdef BPF_DEBUG 
+            bpf_printk("Hash added successfully (kfunc), new checksum: 0x%04x\n", new_ip->check);
+            #endif
             return 0;
         }
     }
 
     // If kfunc failed or not available, use custom SHA256
-    if (debug)
-        bpf_printk("Using custom SHA256 for hash addition\n");
+    #ifdef BPF_DEBUG 
+    bpf_printk("Using custom SHA256 for hash addition\n");
+    #endif
     
     if (bpf_xdp_adjust_head(ctx, 0 - (int)IP_OPT_HASH_LEN))
         return -1;
@@ -415,8 +404,9 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
     int header_len = new_ip->ihl * 4;
     new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
     
-    if (debug)
-        bpf_printk("Hash added successfully (custom), new checksum: 0x%04x\n", new_ip->check);
+    #ifdef BPF_DEBUG 
+    bpf_printk("Hash added successfully (custom), new checksum: 0x%04x\n", new_ip->check);
+    #endif
 
     return 0;
 }
@@ -427,7 +417,6 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
  * XDP program for hash verification and removal with runtime selection
  */
 SEC("xdp_ip_hash_verify")
-//SEC("xdp.frags/ip_hash_verify")
 int xdp_ip_hash_verify_func(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
@@ -453,8 +442,11 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
 
         // Only processing UDP
         if (iphdr->protocol != IPPROTO_UDP) {
-            if (debug)
-                bpf_printk("Not a UDP packet, passing through\n");
+            
+            #ifdef BPF_DEBUG 
+            bpf_printk("Not a UDP packet, passing through\n");
+            #endif
+
             action = XDP_PASS;
             goto out;
         }
@@ -467,45 +459,54 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
 
         struct ip_auth_data *auth_data = lookup_auth_key(iphdr->saddr);
         if (!auth_data) {
-            if (debug)
-                bpf_printk("No authentication key found for source IP %s\n", iphdr->saddr);
+            #ifdef BPF_DEBUG 
+            bpf_printk("No authentication key found for source IP %s\n", iphdr->saddr);
+            #endif
+
             action = XDP_PASS;
             goto out;
         }
 
-        if (debug)
-            bpf_printk("Found authentication key for source IP\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Found authentication key for source IP\n");
+        #endif
 
         if (iphdr->ihl > 5) {
-            if (debug)
-                bpf_printk("IP options present, attempting hash verification with dynamic key\n");
+            #ifdef BPF_DEBUG 
+            bpf_printk("IP options present, attempting hash verification with dynamic key\n");
+            #endif
 
             int verify_result = verify_ip_hash_with_key(ctx, auth_data->key);
 
             if (verify_result == 0) {
-                if (debug)
-                    bpf_printk("Hash verification passed with dynamic key\n");
+                #ifdef BPF_DEBUG 
+                bpf_printk("Hash verification passed with dynamic key\n");
+                #endif
 
                 switch (auth_data->action) {
                     case ACTION_ALLOW:
-                        if (debug)
-                            bpf_printk("Action: ALLOW - removing hash option\n");
+                        #ifdef BPF_DEBUG 
+                        bpf_printk("Action: ALLOW - removing hash option\n");
+                        #endif
                         if (remove_ip_option_hash(ctx) == 0) {
-                            if (debug)
-                                bpf_printk("Hash option removed successfully\n");
+                            #ifdef BPF_DEBUG 
+                            bpf_printk("Hash option removed successfully\n");
+                            #endif
                         } else {
                             bpf_printk("Failed to remove hash option\n");
                         }
                         action = XDP_PASS;
                         break;
                     case ACTION_MARK:
-                        if (debug)
-                            bpf_printk("Action: MARK - passing with mark\n");
+                        #ifdef BPF_DEBUG 
+                        bpf_printk("Action: MARK - passing with mark\n");
+                        #endif
                         action = XDP_PASS;
                         break;
                     case ACTION_DROP:
-                        if (debug)
-                            bpf_printk("Action: DROP - dropping authenticated packet\n");
+                        #ifdef BPF_DEBUG 
+                        bpf_printk("Action: DROP - dropping authenticated packet\n");
+                        #endif
                         action = XDP_DROP;
                         break;
                     default:
@@ -534,7 +535,6 @@ out:
 /**
  * XDP program for adding hash to packets with runtime selection
  */
-//SEC("xdp.frags/ip_hash")
 SEC("xdp_ip_hash")
 int xdp_ip_hash_func(struct xdp_md *ctx)
 {
@@ -607,20 +607,23 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
             goto out;
         }
 
-        if (debug)
-            bpf_printk("Found authentication key for source IP\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Found authentication key for source IP\n");
+        #endif
 
         iphdr->check = 0;
 
-        if (debug)
-            bpf_printk("=== Processing packet for hash addition with dynamic key ===\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("=== Processing packet for hash addition with dynamic key ===\n");
+        #endif
 
         // Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
         int ret = 0;
         if (config_ctx->use_kfunc) {
             // Use kernel SHA256 kfunc
-            if (debug)
-                bpf_printk("Using kfunc SHA256 for verification\n");
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using kfunc SHA256 for verification\n");
+            #endif
 
             ret = bpf_sha256_keyed_hash(auth_data->key, 64,
                            (BYTE *)iphdr,
@@ -628,8 +631,9 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
                            hash_result);
         } else {
             // Use custom SHA256 implementation
-            if (debug)
-                bpf_printk("Using custom SHA256 for verification\n");
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using custom SHA256 for verification\n");
+            #endif
 
             ret = compute_keyed_hash_from_map_dynamic((BYTE *)iphdr, header_size,
                                                            hash_result, auth_data->key);
@@ -640,8 +644,9 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
                 bpf_printk("Failed to add hash option\n");
                 action = XDP_PASS;
             } else {
-                if (debug)
-                    bpf_printk("Hash option added successfully with dynamic key\n");
+                #ifdef BPF_DEBUG 
+                bpf_printk("Hash option added successfully with dynamic key\n");
+                #endif
             }
         } else {
             bpf_printk("Failed to compute hash\n");

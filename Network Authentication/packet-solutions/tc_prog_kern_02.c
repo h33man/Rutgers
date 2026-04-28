@@ -10,7 +10,7 @@
 #include "sha256_kfunc.h"
 #include "chacha20_kfunc.h"
 
-extern __u8 debug;
+//extern __u8 debug;
 
 /* Defines tc_stats_map instead of xdp_stats_map */
 struct {
@@ -44,8 +44,6 @@ static __always_inline __u32 tc_stats_record_action(struct __sk_buff *ctx, __u32
 
 /****************************** IP OPTION MANIPULATION ******************************/
 
-//static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
-//        struct iphdr *ip_orig, BYTE hash[SHA256_BLOCK_SIZE])
 static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
                                 BYTE hash[SHA256_BLOCK_SIZE])
 {
@@ -115,8 +113,9 @@ static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
     int header_len = new_ip->ihl * 4;
     new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
 
-    if(debug)
-        bpf_printk("TC: Hash added, checksum: 0x%04x\n", new_ip->check);
+    #ifdef BPF_DEBUG 
+    bpf_printk("TC: Hash added, checksum: 0x%04x\n", new_ip->check);
+    #endif
 
     return 0;
 }
@@ -136,11 +135,11 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
     void *data = (void *)(long)ctx->data;
     struct hdr_cursor nh = { .pos = data };
     BYTE hash_result[SHA256_BLOCK_SIZE];
-    __u64 start_time;
 
     // TIMING: Calculate total latency for eBPF program
-    if (debug)
-        start_time = bpf_ktime_get_ns();
+    #ifdef BPF_DEBUG 
+    __u64 start_time = bpf_ktime_get_ns();
+    #endif
 
     __u32 key = 0;
     struct {
@@ -191,36 +190,41 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
             goto out;
         }
 
-        if (debug)
-            bpf_printk("Found authentication key for source IP\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("Found authentication key for source IP\n");
+        #endif
 
         iphdr->check = 0;
 
-        if (debug)
-            bpf_printk("=== Processing packet for hash addition with dynamic key ===\n");
+        #ifdef BPF_DEBUG 
+        bpf_printk("=== Processing packet for hash addition with dynamic key ===\n");
+        #endif
 
         // Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
         int ret = 0;
         if (config_ctx->use_kfunc == 0) {
             // Use custom SHA256 implementation
-            if (debug)
-                bpf_printk("Using custom SHA256 for hash\n");
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using custom SHA256 for hash\n");
+            #endif
+
             ret = compute_keyed_hash_from_map_dynamic((BYTE *)iphdr, header_size,
                                                            hash_result, auth_data->key);
         }
         else if (config_ctx->use_kfunc == 1) {
             // Use kernel SHA256 kfunc
-            if (debug)
-                bpf_printk("Using kfunc SHA256 for hash\n");
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using kfunc SHA256 for hash\n");
+            #endif
             
             ret = bpf_sha256_keyed_hash(auth_data->key, 64,
-                           (BYTE *)iphdr, header_size,
-                           hash_result);
+                           (BYTE *)iphdr, header_size, hash_result);
         }
         else if (config_ctx->use_kfunc == 2) {
             // Use custom CHACHA20-POLY1305 implementation
-            if (debug)
-                bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+            #endif
 
             /* copy header to stack buffer first */
             __u8 hdr_copy[60] = {};   /* max IPv4 header size */
@@ -234,9 +238,8 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
                 goto out;
             }
 
-            ret = bpf_chacha20poly1305_auth(auth_data->key, 16, 
-                                            hdr_copy, header_size, 
-                                            hash_result);
+            ret = bpf_chacha20poly1305_auth(auth_data->key, 32, 
+                                            hdr_copy, header_size, hash_result);
 
         } else {
             // Use custom SHA256 implementation
@@ -244,12 +247,12 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
         }
 
         if (ret == 0) {
-            //if (add_ip_option_hash_tc(ctx, iphdr, hash_result) < 0) 
             if (add_ip_option_hash_tc(ctx, hash_result) < 0) {
                 action = TC_ACT_OK;
             } else {
-                if (debug)
-                    bpf_printk("Hash option added successfully with dynamic key\n");
+                #ifdef BPF_DEBUG 
+                bpf_printk("Hash option added successfully with dynamic key\n");
+                #endif
             }
         } else {
             bpf_printk("Failed to compute hash\n");
@@ -259,12 +262,9 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
         action = TC_ACT_OK;
     }
 
-    if (debug) {
-        __u64 end_time = bpf_ktime_get_ns();
-    	__u64 total_latency = end_time - start_time;
-
-    	bpf_printk("Latency of eBPF program: %d ns\n", total_latency);
-    }
+    #ifdef BPF_DEBUG 
+    bpf_printk("Latency of eBPF program: %d ns\n", bpf_ktime_get_ns() - start_time);
+    #endif
 out:
     return tc_stats_record_action(ctx, action);
 }

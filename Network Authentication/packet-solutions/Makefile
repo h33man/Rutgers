@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
-#CFLAGS += -DBPF_DEBUG
 #EXTRA_CFLAGS += -DBPF_DEBUG
 CFLAGS += -DBPF_F_XDP_HAS_FRAGS
 LDFLAGS += -L/usr/lib/x86_64-linux-gnu/
