@@ -229,15 +229,22 @@ __bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
 }
 
 /* BTF registration */
-//BTF_SET8_START(sha256_kfunc_ids)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 BTF_KFUNCS_START(sha256_kfunc_ids)
+#else
+BTF_SET8_START(sha256_kfunc_ids)
+#endif
 BTF_ID_FLAGS(func, bpf_sha256_ctx_create, KF_ACQUIRE | KF_RET_NULL | KF_SLEEPABLE)
 BTF_ID_FLAGS(func, bpf_sha256_ctx_release, KF_RELEASE)
 BTF_ID_FLAGS(func, bpf_bpf_sha256_update, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_bpf_sha256_final, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_sha256_oneshot, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_sha256_keyed_hash, KF_TRUSTED_ARGS)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 BTF_KFUNCS_END(sha256_kfunc_ids)
+#else
+BTF_SET8_END(sha256_kfunc_ids)
+#endif
 
 static const struct btf_kfunc_id_set sha256_kfunc_set = {
     .owner = THIS_MODULE,

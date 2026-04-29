@@ -12,7 +12,7 @@
  *     explicitly fill it with memcpy + memset before use.
  *  3. Removed dead out__sz local variable and its always-true branch.
  *  4. chacha20_block_self: use put_unaligned_le32 for serialization instead
- *     of 4 byte-shift stores — compiles to a single store on LE x86.
+ *     of 4 byte-shift stores - compiles to a single store on LE x86.
  */
 
 #include <linux/module.h>
@@ -23,10 +23,15 @@
 #include <linux/btf_ids.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 #include <linux/unaligned.h>   /* get_unaligned_le32, put_unaligned_le32 */
+#else
+    #include <asm/unaligned.h>
+#endif
 
 /*
- * Do NOT include <crypto/chacha.h> — it pulls in struct chacha_ctx and
+ * Do NOT include <crypto/chacha.h> - it pulls in struct chacha_ctx and
  * other types already present in vmlinux BTF.  When pahole deduplicates
  * the module's DWARF against /sys/kernel/btf/vmlinux it strips those shared
  * types and accidentally discards the kfunc BTF entries too, leaving a
@@ -39,18 +44,18 @@
  * Fix: implement ChaCha20 inline (RFC 8439 §2.1).  Zero external symbols
  * are required.  This is the same approach used for Poly1305 below.
  *
- * Do NOT include <crypto/poly1305.h> either — it pulls in _arch symbols.
+ * Do NOT include <crypto/poly1305.h> either - it pulls in _arch symbols.
  */
 
 /* ================================================================
- * ChaCha20 — RFC 8439 §2.1  (fully self-contained, no kernel deps)
+ * ChaCha20 - RFC 8439 §2.1  (fully self-contained, no kernel deps)
  * ================================================================ */
 
 #define CHACHA_KEY_SIZE    32u
 #define CHACHA_BLOCK_SIZE  64u
-#define CHACHA_STATE_WORDS 16u   /* 16 × u32 = 64 bytes */
+#define CHACHA_STATE_WORDS 16u   /* 16 x u32 = 64 bytes */
 
-/* RFC 8439 §2.1.1 — the four constant words ("expand 32-byte k") */
+/* RFC 8439 §2.1.1- the four constant words ("expand 32-byte k") */
 #define CHACHA_CONST_0  0x61707865u
 #define CHACHA_CONST_1  0x3320646eu
 #define CHACHA_CONST_2  0x79622d32u
@@ -93,7 +98,7 @@ static void chacha20_block_self(u32 input[CHACHA_STATE_WORDS],
         CHACHA_QR(x[ 3], x[ 4], x[ 9], x[14]);
     }
 
-    /* OPT: put_unaligned_le32 → single store on LE x86 vs 4 byte stores */
+    /* OPT: put_unaligned_le32 => single store on LE x86 vs 4 byte stores */
     for (i = 0; i < CHACHA_STATE_WORDS; i++)
         put_unaligned_le32(x[i] + input[i], output + i * 4);
 
@@ -151,7 +156,7 @@ static void chacha20_init_state(u32 state[CHACHA_STATE_WORDS],
 #endif
 
 /* ==================================================================
- * Poly1305 — RFC 8439 §2.5
+ * Poly1305 - RFC 8439 §2.5
  * ================================================================== */
 
 #define POLY1305_KEY_SIZE    32u
@@ -160,8 +165,8 @@ static void chacha20_init_state(u32 state[CHACHA_STATE_WORDS],
 #define BPF_SHA256_BLOCK_SIZE    32u
 
 struct poly1305_state {
-    u64 h[5];   /* accumulator, 5 × 26-bit limbs */
-    u64 r[5];   /* clamped key r, 5 × 26-bit limbs */
+    u64 h[5];   /* accumulator, 5 x 26-bit limbs */
+    u64 r[5];   /* clamped key r, 5 x 26-bit limbs */
     u32 s[4];   /* pad s (last 16 bytes of one-time key) */
 };
 
@@ -228,7 +233,7 @@ static void poly1305_block(struct poly1305_state *st,
 /*
  * poly1305_update - absorb @len bytes of @data into the Poly1305 state
  *
- * OPT: removed memzero_explicit(buf) — buf holds input data fragments
+ * OPT: removed memzero_explicit(buf) - buf holds input data fragments
  * (the IP header), not key material.  Zeroing it on every partial block
  * was pure overhead with no security benefit.
  * OPT: removed = {} zero-init; replaced with explicit memset for clarity.
@@ -248,14 +253,14 @@ static void poly1305_update(struct poly1305_state *st,
         memset(buf + len, 0, POLY1305_BLOCK_SIZE - len);
         buf[len] = 0x01;
         poly1305_block(st, buf, 0);
-        /* OPT: no memzero_explicit — buf is input data, not a secret */
+        /* OPT: no memzero_explicit - buf is input data, not a secret */
     }
 }
 
 /*
  * poly1305_final - fully reduce h mod (2^130-5) and write the 16-byte tag
  *
- * OPT: removed memzero_explicit(st) — the poly1305_state holds derived
+ * OPT: removed memzero_explicit(st) - the poly1305_state holds derived
  * MAC state, not the original secret key.  The key material lives in
  * key32 in the kfunc, which is explicitly zeroed after use.
  */
@@ -297,14 +302,14 @@ static void poly1305_final(struct poly1305_state *st,
     f = (u64)h2 + st->s[2] + (f >> 32); put_unaligned_le32((u32)f, tag +  8);
     f = (u64)h3 + st->s[3] + (f >> 32); put_unaligned_le32((u32)f, tag + 12);
 
-    /* OPT: removed memzero_explicit(st) — not key material */
+    /* OPT: removed memzero_explicit(st) - not key material */
 }
 
 /* ==================================================================
  * ChaCha20-Poly1305 authentication core
  *
  * OPT: removed memzero_explicit on chacha_state and chacha_stream.
- * chacha_stream is the Poly1305 one-time key derived from the secret —
+ * chacha_stream is the Poly1305 one-time key derived from the secret -
  * it is sensitive, but zeroing it here costs ~30 ns per packet and
  * provides minimal benefit since key32 (the true secret) is zeroed in
  * the kfunc.  Re-add if your threat model requires defense-in-depth
@@ -327,7 +332,7 @@ static void chacha20poly1305_auth_internal(const u8 key32[CHACHA_KEY_SIZE],
     poly1305_final(&poly, tag_out);
 
     /* OPT: removed memzero_explicit(chacha_stream) and memzero_explicit(chacha_state)
-     * Only key32 in the kfunc is zeroed — it is the actual secret. */
+     * Only key32 in the kfunc is zeroed - it is the actual secret. */
 }
 
 /* ==================================================================
@@ -351,7 +356,7 @@ __bpf_kfunc_start_defs();
  * OPT summary vs original:
  *  - Removed 5 of 6 memzero_explicit calls (keep only key32)
  *  - Removed dead out__sz local + its always-true branch
- *  - Removed memzero_explicit(tag) — tag is overwritten on next call
+ *  - Removed memzero_explicit(tag) - tag is overwritten on next call
  *  - chacha20_block_self uses put_unaligned_le32 (1 store vs 4 shifts)
  *  - poly1305_update partial block: no = {} init, no memzero_explicit
  */
@@ -380,7 +385,7 @@ __bpf_kfunc int bpf_chacha20poly1305_auth(const u8 *key,  u32 key__sz,
 
     chacha20poly1305_auth_internal(key32, data, data__sz, tag);
 
-    /* OPT: zero only the expanded secret key — the one value an attacker
+    /* OPT: zero only the expanded secret key - the one value an attacker
      * must not recover from stack residue.  tag, chacha_stream, etc. are
      * derived values; their residue does not expose the key directly. */
     memzero_explicit(key32, sizeof(key32));
@@ -396,11 +401,15 @@ __bpf_kfunc_end_defs();
 /* ==================================================================
  * Registration
  * ================================================================== */
-//BTF_SET8_START(chacha20poly1305_kfunc_ids)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 BTF_KFUNCS_START(chacha20poly1305_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_chacha20poly1305_auth, KF_TRUSTED_ARGS)
-//BTF_SET8_END(chacha20poly1305_kfunc_ids)
 BTF_KFUNCS_END(chacha20poly1305_kfunc_ids)
+#else
+BTF_SET8_START(chacha20poly1305_kfunc_ids)
+BTF_ID_FLAGS(func, bpf_chacha20poly1305_auth, KF_TRUSTED_ARGS)
+BTF_SET8_END(chacha20poly1305_kfunc_ids)
+#endif
 
 static const struct btf_kfunc_id_set chacha20poly1305_kfunc_set = {
     .owner = THIS_MODULE,
@@ -425,7 +434,7 @@ static int __init chacha20poly1305_kfunc_init(void)
         return ret;
     }
 
-    pr_info("chacha20poly1305_kfunc: loaded (optimized) – bpf_chacha20poly1305_auth() ready\n");
+    pr_info("chacha20poly1305_kfunc: loaded (optimized) - bpf_chacha20poly1305_auth() ready\n");
     return 0;
 }
 
