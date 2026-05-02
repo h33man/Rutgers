@@ -1,0 +1,29 @@
+# 1. List all client nodes and their IP addresses in nodes.txt
+apt install ansible-core
+
+# 2. Init all nodes (from grid console) - makes sure the nodes have the correct images and are on
+./init_nodes.sh
+
+# 2. Set up all client nodes (from a control node that can ssh all client nodes) - makes sure interfaces are configured and udp_client installed
+./setup_nodes.sh
+
+# 3. Verify Ansible can reach all nodes
+ansible all -i inventory.ini -m ping
+
+# 4. Launch attack
+ansible-playbook -i inventory.ini deploy_and_launch.yml -f 50
+
+# 5. When done, stop everything
+ansible-playbook -i inventory.ini stop_attack.yml -f 50
+
+# Control parallelism (default is 5, increase for speed)
+ansible-playbook -i inventory.ini launch_attack.yml
+
+# Launch on all 100 nodes in parallel
+ansible-playbook -i inventory.ini launch_attack.yml -f 100
+
+# Target a subset for testing
+ansible-playbook -i inventory.ini launch_attack.yml --limit "node10-1.grid.orbit-lab.org,node10-2.grid.orbit-lab.org"
+
+# Stop the attack
+ansible-playbook -i inventory.ini stop_attack.yml

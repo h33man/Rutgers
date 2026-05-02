@@ -1,0 +1,25 @@
+---
+- name: Stop UDP flood clients
+  hosts: clients
+  gather_facts: false
+
+  tasks:
+    - name: Kill udp_client processes
+      shell: "pkill -f udp_client"
+      failed_when: false
+
+    - name: Confirm process is gone
+      shell: "pgrep -f udp_client"
+      register: proc_check
+      failed_when: false
+      changed_when: false
+
+    - name: Report success
+      debug:
+        msg: "udp_client stopped on {{ inventory_hostname }}"
+      when: proc_check.rc != 0
+
+    - name: Report failure
+      debug:
+        msg: "WARNING: udp_client still running on {{ inventory_hostname }} (PID: {{ proc_check.stdout }})"
+      when: proc_check.rc == 0

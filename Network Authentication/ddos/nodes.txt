@@ -1,0 +1,2 @@
+node10-4.grid.orbit-lab.org 192.168.100.4
+node10-7.grid.orbit-lab.org 192.168.100.7

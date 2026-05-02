@@ -1,0 +1,43 @@
+---
+- name: Deploy udp_client and launch attack
+  hosts: clients
+  gather_facts: false
+  vars:
+    server_ip: "192.168.100.1"
+    server_port: "5201"
+    packet_size: "8192"
+    duration: "100"
+    interface: "DATA1"
+    cpu: "2"
+    udp_client_local: "./udp_client"          # path on control machine
+    udp_client_remote: "/usr/local/bin/udp_client"
+    ansible_user: "root"
+    ansible_ssh_private_key_file: "~/.ssh/id_rsa"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o ConnectTimeout=10"
+
+
+  tasks:
+    - name: Check node is reachable
+      wait_for_connection:
+        timeout: 15
+
+    - name: Launch udp_client in background
+      shell: >
+        nohup {{ udp_client_remote }}
+        -d {{ server_ip }}
+        -p {{ packet_size }}
+        -t {{ duration }}
+        -i {{ interface }}
+        > /tmp/udp_client.log 2>&1 &
+        echo $!
+      async: 10
+      poll: 0
+
+    - name: Confirm process is running
+      shell: "pgrep -f udp_client"
+      register: proc_check
+      failed_when: proc_check.rc != 0
+
+    - name: Report status
+      debug:
+        msg: "udp_client deployed and running on {{ inventory_hostname }}"
