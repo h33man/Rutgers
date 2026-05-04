@@ -48,9 +48,18 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         __u8 use_kfunc;  // Runtime flag: 0 = custom SHA256, 1 = kfunc SHA256
     } *config_ctx;
 
+   #ifdef BPF_DEBUG
+    __u64 t0, t1, t2, t3, t4, t5, t6, t7;
+    t0 = bpf_ktime_get_ns();
+    #endif
+
     config_ctx = bpf_map_lookup_elem(&config_map, &key);
     if (!config_ctx)
         return -1;
+
+   #ifdef BPF_DEBUG
+    t1 = bpf_ktime_get_ns();
+    #endif
 
     struct {
         BYTE extracted_hash[SHA256_BLOCK_SIZE];
@@ -63,6 +72,9 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     if (!verify_ctx)
         return -1;
 
+   #ifdef BPF_DEBUG
+    t2 = bpf_ktime_get_ns();
+    #endif
 
 #if 0
     /* Prefetch SHA256 map entries into cache before any other map accesses.
@@ -75,6 +87,12 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         struct { BYTE buffer[128]; WORD m[64]; } *_sha_tmp __attribute__((unused)) =
             bpf_map_lookup_elem(&sha256_temp_map, &sha_key);
     }
+
+    #ifdef BPF_DEBUG
+    // map lookups
+    t3 = bpf_ktime_get_ns();
+    #endif
+
 #endif
 
     struct iphdr *ip_header = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
@@ -102,6 +120,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
             safe_ip_header[i] = 0;
         }
     }
+
+    #ifdef BPF_DEBUG
+    t4 = bpf_ktime_get_ns();
+    #endif
 
     struct iphdr *safe_ip = (struct iphdr *)safe_ip_header;
     uint8_t *options = safe_ip_header + sizeof(struct iphdr);
@@ -148,6 +170,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         }
     }
 
+    #ifdef BPF_DEBUG
+    t5 = bpf_ktime_get_ns();
+    #endif
+
     if (!found_hash) {
         bpf_printk("Hash option not found\n");
         return -1;
@@ -157,6 +183,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     verify_ctx->original_header.ihl = 5;
     verify_ctx->original_header.tot_len = bpf_htons(bpf_ntohs(verify_ctx->original_header.tot_len) - options_len);
     verify_ctx->original_header.check = 0;
+
+    #ifdef BPF_DEBUG
+    t6 = bpf_ktime_get_ns();
+    #endif
 
     int ret = 0;
     if (config_ctx->use_kfunc == 0) {
@@ -208,6 +238,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         bpf_printk("Invalid option for hash\n");
     }
 
+    #ifdef BPF_DEBUG
+    // sha256
+    t7 = bpf_ktime_get_ns();
+    #endif
 
     if (ret != 0) {
         bpf_printk("Failed to compute hash for verification\n");
@@ -230,6 +264,14 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     bpf_printk("Hash computed: ");
     print_hex(verify_ctx->computed_hash, 32);
     #endif
+
+    #ifdef BPF_DEBUG 
+    bpf_printk("config map lookup=%llu verify map lookup=%llu sha map lookup=%llu \
+                header copy loop=%llu hash extraction loop=%llu original_header reconstruction=%llu \
+                SHA256=%llu",
+                t1-t0, t2-t1, t3-t2, t4-t3, t5-t4, t6-t5, t7-t6);
+    #endif
+
 
     if (hash_match) {
         #ifdef BPF_DEBUG 
@@ -448,6 +490,12 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
     void *data = (void *)(long)ctx->data;
     struct hdr_cursor nh = { .pos = data };
 
+    #ifdef BPF_DEBUG
+    __u64 t0, t1, t2, t3;
+    t0 = bpf_ktime_get_ns();
+    t1 = t2 = t3 = t0;
+    #endif
+
     eth_type = parse_ethhdr(&nh, data_end, &eth);
     if (eth_type < 0) {
         action = XDP_ABORTED;
@@ -488,6 +536,11 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
             goto out;
         }
 
+        #ifdef BPF_DEBUG
+	    // key lookup
+        t1 = bpf_ktime_get_ns();
+        #endif
+
         #ifdef BPF_DEBUG 
         bpf_printk("Found authentication key for source IP\n");
         #endif
@@ -498,6 +551,10 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
             #endif
 
             int verify_result = verify_ip_hash_with_key(ctx, auth_data->key);
+
+            #ifdef BPF_DEBUG
+	        t2 = bpf_ktime_get_ns();
+            #endif
 
             if (verify_result == 0) {
                 #ifdef BPF_DEBUG 
@@ -548,6 +605,12 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
     } else if (eth_type == bpf_htons(ETH_P_IPV6)) {
         action = XDP_PASS;
     }
+
+    #ifdef BPF_DEBUG
+    //adjust
+    t3 = bpf_ktime_get_ns();
+    bpf_printk("key lookup=%llu adjust=%llu\n", t1-t0, t3-t2);
+    #endif
 
 out:
     return xdp_stats_record_action(ctx, action);

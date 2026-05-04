@@ -1,5 +1,5 @@
 /*
- * SHA256 kfunc Kernel Module - Final Version with Fixed Types
+ * SHA256 kfunc Kernel Module
  * Exposes SHA256 hash functions as eBPF kfuncs
  * Based on Brad Conte's SHA256 implementation
  */
@@ -33,12 +33,11 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Research Module");
-MODULE_DESCRIPTION("SHA256 kfunc for eBPF programs - Final Version");
+MODULE_DESCRIPTION("Custom SHA256 kfunc for eBPF programs");
 MODULE_VERSION("1.0");
 
 /*************************** TYPES ***************************/
 typedef unsigned char u8;
-
 
 #define BPF_SHA256_BLOCK_SIZE 32
 

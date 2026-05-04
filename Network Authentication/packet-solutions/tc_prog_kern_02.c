@@ -52,6 +52,12 @@ static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
     uint8_t option_len = IP_OPT_HASH_LEN;
     int i;
 
+    #ifdef BPF_DEBUG
+     __u64 t0, t1, t2, t3, t4;
+    t0 = bpf_ktime_get_ns();
+    t1 = t2 = t3 = t4 = t0;
+    #endif
+
     // Save original headers before bpf_skb_change_head invalidates pointers
     struct ethhdr *orig_eth = (struct ethhdr *)data;
     if ((void *)(orig_eth + 1) > data_end)
@@ -63,6 +69,10 @@ static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
 
     struct ethhdr saved_eth = *orig_eth;
     struct iphdr saved_ip = *orig_ip;
+
+    #ifdef BPF_DEBUG
+    t1 = bpf_ktime_get_ns();
+    #endif
 
     // Use bpf_skb_change_head to add space
     if (bpf_skb_change_head(skb, IP_OPT_HASH_LEN, 0))
@@ -87,6 +97,10 @@ static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
     new_ip->ihl = (sizeof(struct iphdr) + IP_OPT_HASH_LEN) / 4;
     new_ip->tot_len = bpf_htons(bpf_ntohs(new_ip->tot_len) + IP_OPT_HASH_LEN);
     new_ip->check = 0;
+
+    #ifdef BPF_DEBUG
+    t3 = bpf_ktime_get_ns();
+    #endif
 
     // Add option after IP header
     uint8_t *options = (uint8_t *)(new_ip + 1);
@@ -113,6 +127,12 @@ static __always_inline int add_ip_option_hash_tc(struct __sk_buff *skb,
     int header_len = new_ip->ihl * 4;
     new_ip->check = calculate_ip_checksum((const void *)new_ip, header_len);
 
+    #ifdef BPF_DEBUG
+    t4 = bpf_ktime_get_ns();
+    bpf_printk("save=%llu change_head=%llu restore=%llu options=%llu\n",
+    		t1-t0, t2-t1, t3-t2, t4-t3);
+    #endif
+
     #ifdef BPF_DEBUG 
     bpf_printk("TC: Hash added, checksum: 0x%04x\n", new_ip->check);
     #endif
@@ -136,6 +156,12 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
     struct hdr_cursor nh = { .pos = data };
     BYTE hash_result[SHA256_BLOCK_SIZE];
 
+    #ifdef BPF_DEBUG
+    __u64 t0, t1, t2, t3, t4;
+    t0 = bpf_ktime_get_ns();
+    t1 = t2 = t3 = t4 = t0;
+    #endif
+
     // TIMING: Calculate total latency for eBPF program
     #ifdef BPF_DEBUG 
     __u64 start_time = bpf_ktime_get_ns();
@@ -149,6 +175,11 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
     config_ctx = bpf_map_lookup_elem(&config_map, &key);
     if (!config_ctx)
         return -1;
+
+    #ifdef BPF_DEBUG
+    // map lookups
+    t1 = bpf_ktime_get_ns();
+    #endif
 
     __builtin_memset(hash_result, 0, SHA256_BLOCK_SIZE);
 
@@ -189,6 +220,11 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
             action = TC_ACT_OK;
             goto out;
         }
+
+        #ifdef BPF_DEBUG
+	    //key lookup
+    	t2 = bpf_ktime_get_ns();
+        #endif
 
         #ifdef BPF_DEBUG 
         bpf_printk("Found authentication key for source IP\n");
@@ -246,6 +282,11 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
             bpf_printk("Invalid option for hash\n");
         }
 
+        #ifdef BPF_DEBUG
+	    //sha256
+    	t3 = bpf_ktime_get_ns();
+        #endif
+
         if (ret == 0) {
             if (add_ip_option_hash_tc(ctx, hash_result) < 0) {
                 action = TC_ACT_OK;
@@ -258,9 +299,18 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
             bpf_printk("Failed to compute hash\n");
             action = TC_ACT_OK;
         }
+        #ifdef BPF_DEBUG
+	    //adjust
+    	t4 = bpf_ktime_get_ns();
+        #endif
+
     } else if (eth_type == bpf_htons(ETH_P_IPV6)) {
         action = TC_ACT_OK;
     }
+
+    #ifdef BPF_DEBUG
+    bpf_printk("map lookup=%llu key lookup=%llu sha=%llu adjust=%llu\n", t1-t0, t2-t1, t3-t2, t4-t3);
+    #endif
 
     #ifdef BPF_DEBUG 
     bpf_printk("Latency of eBPF program: %d ns\n", bpf_ktime_get_ns() - start_time);
