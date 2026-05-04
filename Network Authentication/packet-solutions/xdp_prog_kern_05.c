@@ -63,6 +63,20 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     if (!verify_ctx)
         return -1;
 
+
+#if 0
+    /* Prefetch SHA256 map entries into cache before any other map accesses.
+     * This keeps sha256_ctx_map and sha256_temp_map warm when SHA runs later,
+     * avoiding cache eviction caused by the intervening header copy loop. */
+    {
+        __u32 sha_key = 0;
+        SHA256_CTX *_sha_ctx __attribute__((unused)) =
+            bpf_map_lookup_elem(&sha256_ctx_map, &sha_key);
+        struct { BYTE buffer[128]; WORD m[64]; } *_sha_tmp __attribute__((unused)) =
+            bpf_map_lookup_elem(&sha256_temp_map, &sha_key);
+    }
+#endif
+
     struct iphdr *ip_header = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
     if ((void *)(ip_header + 1) > data_end)
         return -1;
@@ -160,8 +174,15 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         bpf_printk("Using kfunc SHA256 for verification\n");
         #endif
 
-        ret = bpf_sha256_keyed_hash(dynamic_key, 64, (const __u8 *)&verify_ctx->original_header,
-                                   sizeof(struct iphdr), verify_ctx->computed_hash);
+//        ret = bpf_sha256_keyed_hash(dynamic_key, 64, (const __u8 *)&verify_ctx->original_header,
+//                                   sizeof(struct iphdr), verify_ctx->computed_hash);
+        __u8 hdr_stack[sizeof(struct iphdr)];
+        __builtin_memcpy(hdr_stack, &verify_ctx->original_header, sizeof(struct iphdr));
+        ret = bpf_sha256_keyed_hash(dynamic_key, 64,
+                                   hdr_stack, //(const __u8 *)&verify_ctx->original_header,
+                                   sizeof(struct iphdr),
+                                   verify_ctx->computed_hash);
+
     }
     else if (config_ctx->use_kfunc == 2) {
         // Use custom CHACHA20-POLY1305 implementation
