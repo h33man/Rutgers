@@ -25,6 +25,26 @@
       args:
         executable: /bin/bash
 
+    - name: Load sha_crypto kernel module
+      shell: insmod {{ cwd }}/../kmodule/sha_crypto.ko
+      register: sha_insmod
+      failed_when: sha_insmod.rc != 0 and 'File exists' not in sha_insmod.stderr
+
+    - name: Load chacha20_kfunc kernel module
+      shell: insmod {{ cwd }}/../kmodule/chacha20_kfunc.ko
+      register: chacha_insmod
+      failed_when: chacha_insmod.rc != 0 and 'File exists' not in chacha_insmod.stderr
+
+    - name: Verify modules are loaded
+      shell: lsmod | grep -E 'sha_crypto|chacha20_kfunc'
+      register: lsmod_result
+      failed_when: false
+
+    - name: Report module load failures
+      debug:
+        msg: "WARNING: modules not fully loaded on {{ inventory_hostname }}: {{ lsmod_result.stdout }}"
+      when: "'sha_crypto' not in lsmod_result.stdout or 'chacha20_kfunc' not in lsmod_result.stdout"
+
     - name: Add clsact qdisc to interface
       shell: >
         tc qdisc show dev {{ iface }} | grep -q clsact ||
@@ -59,11 +79,18 @@
       register: tc_verify
       failed_when: false
 
-    - name: Report status
+    - name: Report TC filter failure
       debug:
-        msg: |
-          {{ inventory_hostname }} auth setup complete:
-            IP: {{ node_ip }}/16
-            TC filter: {{ 'loaded' if 'bpf' in tc_verify.stdout else 'NOT FOUND' }}
-            Key add: {{ 'OK' if key_result.rc == 0 else 'FAILED' }}
-            Crypto mode: {{ 'OK' if crypto_result.rc == 0 else 'FAILED' }}
+        msg: "WARNING: TC filter not loaded on {{ inventory_hostname }}"
+      when: "'bpf' not in tc_verify.stdout"
+
+    - name: Report key add failure
+      debug:
+        msg: "WARNING: Key add failed on {{ inventory_hostname }}"
+      when: "key_result.rc != 0"
+
+    - name: Report crypto mode failure
+      debug:
+        msg: "WARNING: Crypto mode failed on {{ inventory_hostname }}"
+      when: "crypto_result.rc != 0"
+

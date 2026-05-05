@@ -19,6 +19,7 @@
       register: tc_verify
       failed_when: false
 
-    - name: Report
+    - name: Report teardown failure
       debug:
-        msg: "{{ inventory_hostname }} auth torn down — TC filter: {{ 'still present!' if 'bpf' in tc_verify.stdout else 'removed OK' }}"
+        msg: "WARNING: TC filter still present on {{ inventory_hostname }}"
+      when: "'bpf' in tc_verify.stdout"
