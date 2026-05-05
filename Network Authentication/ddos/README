@@ -27,3 +27,13 @@ ansible-playbook -i inventory.ini launch_attack.yml --limit "node10-1.grid.orbit
 
 # Stop the attack
 ansible-playbook -i inventory.ini stop_attack.yml
+
+# Setup eBPF authentication
+# Apply auth to all nodes
+ansible-playbook -i inventory.ini setup_ebpf.yml -f 50
+
+# Apply to a subset only
+ansible-playbook -i inventory.ini setup_ebpf.yml -f 50 --limit "node10-1.grid.orbit-lab.org,node10-2.grid.orbit-lab.org"
+
+# Tear down
+ansible-playbook -i inventory.ini teardown_ebpf.yml -f 50

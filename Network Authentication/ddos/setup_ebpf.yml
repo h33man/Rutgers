@@ -1,0 +1,69 @@
+---
+- name: Setup eBPF authentication on client nodes
+  hosts: clients
+  gather_facts: false
+  vars:
+    cwd: "/root/Rutgers/Authentication/packet-solutions"
+    tc_obj: "tc_prog_kern_02.o"
+    tc_sec: "tc_ip_hash"
+    iface: "DATA1"
+    mtu: 9000
+    # Hardcoded key for now
+    auth_key: "4b758f9498d3312616ecc261994376452a3b4c5d6e7f8091a2b3c4d5e6f708191a2b3c4d5e6f708192a3b4c5d6e7f8090a1b2c3d4e5f60718293a4b5c6d7e8f9"
+
+  tasks:
+    - name: Check node is reachable
+      wait_for_connection:
+        timeout: 15
+
+    - name: Get node IP from nodes.txt on control machine
+      set_fact:
+        node_ip: "{{ lookup('file', 'nodes.txt') | regex_search(inventory_hostname + ' (\\S+)', '\\1') | first }}"
+
+    - name: Set ulimit for locked memory
+      shell: ulimit -l unlimited
+      args:
+        executable: /bin/bash
+
+    - name: Add clsact qdisc to interface
+      shell: >
+        tc qdisc show dev {{ iface }} | grep -q clsact ||
+        tc qdisc add dev {{ iface }} clsact
+      register: qdisc_result
+      failed_when: false
+
+    - name: Set MTU to {{ mtu }}
+      shell: ip link set dev {{ iface }} mtu {{ mtu }}
+
+    - name: Load TC eBPF program
+      shell: >
+        tc filter add dev {{ iface }} egress bpf
+        obj {{ cwd }}/{{ tc_obj }}
+        sec {{ tc_sec }}
+      register: tc_load
+      failed_when: tc_load.rc != 0
+
+    - name: Add authentication key for {{ node_ip }}/16
+      shell: >
+        {{ cwd }}/xdp_bpf_user add-hex {{ node_ip }}/16 {{ auth_key }}
+      register: key_result
+      failed_when: key_result.rc != 0
+
+    - name: Enable SHA crypto kfunc mode
+      shell: "{{ cwd }}/xdp_use_kfunc config_map 1"
+      register: crypto_result
+      failed_when: crypto_result.rc != 0
+
+    - name: Verify TC filter is loaded
+      shell: tc filter show dev {{ iface }} egress
+      register: tc_verify
+      failed_when: false
+
+    - name: Report status
+      debug:
+        msg: |
+          {{ inventory_hostname }} auth setup complete:
+            IP: {{ node_ip }}/16
+            TC filter: {{ 'loaded' if 'bpf' in tc_verify.stdout else 'NOT FOUND' }}
+            Key add: {{ 'OK' if key_result.rc == 0 else 'FAILED' }}
+            Crypto mode: {{ 'OK' if crypto_result.rc == 0 else 'FAILED' }}

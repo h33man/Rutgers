@@ -1,0 +1,24 @@
+---
+- name: Teardown eBPF authentication on client nodes
+  hosts: clients
+  gather_facts: false
+  vars:
+    iface: "DATA1"
+
+  tasks:
+    - name: Remove TC eBPF filter
+      shell: tc filter del dev {{ iface }} egress
+      failed_when: false
+
+    - name: Remove clsact qdisc
+      shell: tc qdisc del dev {{ iface }} clsact
+      failed_when: false
+
+    - name: Confirm TC filter removed
+      shell: tc filter show dev {{ iface }} egress
+      register: tc_verify
+      failed_when: false
+
+    - name: Report
+      debug:
+        msg: "{{ inventory_hostname }} auth torn down — TC filter: {{ 'still present!' if 'bpf' in tc_verify.stdout else 'removed OK' }}"
