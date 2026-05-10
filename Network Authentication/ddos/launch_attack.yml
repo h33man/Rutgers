@@ -3,7 +3,7 @@
   hosts: clients
   gather_facts: false
   vars:
-    server_ip: "192.168.100.1"
+    server_ip: "10.29.1.4"
     server_port: "5201"
     packet_size: "8192"
     duration: "100"
@@ -11,9 +11,8 @@
     cpu: "2"
     udp_client_local: "./udp_client"          # path on control machine
     udp_client_remote: "/usr/local/bin/udp_client"
-    ansible_user: "root"
-    ansible_ssh_private_key_file: "~/.ssh/id_rsa"
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o ConnectTimeout=10"
+    #ansible_user: "root"
+    #ansible_ssh_common_args: "-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -o HostKeyAlgorithms=ssh-rsa,ssh-ed25519"
 
 
   tasks:
