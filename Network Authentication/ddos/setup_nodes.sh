@@ -82,7 +82,6 @@ for node in "${ALL_NODES[@]}"; do
       ip addr add $client_ip/16 dev $DATA_IFACE
     fi
     ip link set dev $DATA_IFACE up
-    ip link set dev $DATA_IFACE mtu $DATA_MTU
     ip route add 10.29.0.0/16 via 10.20.0.1 dev $DATA_IFACE proto static 
 EOF
 
@@ -167,8 +166,6 @@ cat >> "$INVENTORY_FILE" << EOF
 
 [clients:vars]
 ansible_user=$SSH_USER
-ansible_ssh_private_key_file=~/.ssh/id_rsa
-ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ConnectTimeout=10'
 EOF
 
 READY=$(grep -c "grid.orbit-lab.org" "$INVENTORY_FILE")
