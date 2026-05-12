@@ -47,7 +47,9 @@ echo ""
 echo "=== Verifying key-based SSH access ==="
 SSH_FAIL=()
 for node in "${ALL_NODES[@]}"; do
-  if ssh -o BatchMode=yes $SSH_OPTS "${SSH_USER}@${node}" "echo ok" &>/dev/null; then
+  client_ip="${NODE_IP[$node]}"
+
+  if ssh -o BatchMode=yes $SSH_OPTS "${SSH_USER}@${client_ip}" "echo ok" &>/dev/null; then
     echo "  [$node] SSH OK"
   else
     echo "  [$node] SSH FAILED"
@@ -69,7 +71,7 @@ for node in "${ALL_NODES[@]}"; do
 
   client_ip="${NODE_IP[$node]}"
 
-  ssh -o BatchMode=yes $SSH_OPTS "${SSH_USER}@${node}" bash << EOF &
+  ssh -o BatchMode=yes $SSH_OPTS "${SSH_USER}@${client_ip}" bash << EOF &
     # Already reachable — nothing to do
     if ping -c1 -W2 -I $DATA_IFACE $CONTROL_NODE_IP &>/dev/null; then
       echo "[$node] Data plane already reachable — skipping config"
@@ -96,8 +98,8 @@ for node in "${ALL_NODES[@]}"; do
   fi
 
   client_ip="${NODE_IP[$node]}"
-  if ssh -o BatchMode=yes $SSH_OPTS "${SSH_USER}@${node}" \
-       "ping -c9 -W2 -I $DATA_IFACE $CONTROL_NODE_IP" &>/dev/null; then
+  if ssh -o BatchMode=yes $SSH_OPTS "${SSH_USER}@${client_ip}" \
+       "ping -c3 -W2 -I $DATA_IFACE $CONTROL_NODE_IP" &>/dev/null; then
     echo "  [$node] Data plane OK ($client_ip)"
   else
     echo "  [$node] Data plane FAILED"
