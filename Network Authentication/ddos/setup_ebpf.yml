@@ -18,7 +18,7 @@
 
     - name: Get node IP from nodes.txt on control machine
       set_fact:
-        node_ip: "{{ lookup('file', 'nodes.txt') | regex_search(inventory_hostname + ' (\\S+)', '\\1') | first }}"
+        node_ip: "{{ lookup('file', 'inventory2.ini') | regex_search(inventory_hostname + ' ansible_host=(\\S+)', '\\1') | first }}"
 
     - name: Set ulimit for locked memory
       shell: ulimit -l unlimited
@@ -26,7 +26,7 @@
         executable: /bin/bash
 
     - name: Load sha_crypto kernel module
-      shell: insmod {{ cwd }}/../kmodule/sha_crypto.ko
+      shell: insmod {{ cwd }}/../kmodule/sha256_crypto.ko
       register: sha_insmod
       failed_when: sha_insmod.rc != 0 and 'File exists' not in sha_insmod.stderr
 
@@ -52,8 +52,8 @@
       register: qdisc_result
       failed_when: false
 
-    - name: Set MTU to {{ mtu }}
-      shell: ip link set dev {{ iface }} mtu {{ mtu }}
+#    - name: Set MTU to {{ mtu }}
+#      shell: ip link set dev {{ iface }} mtu {{ mtu }}
 
     - name: Load TC eBPF program
       shell: >
