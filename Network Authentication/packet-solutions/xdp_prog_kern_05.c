@@ -13,14 +13,12 @@
 #include "sha256.h"
 #include "chacha20_kfunc.h"
 
-//extern __u8 debug;
-
 #include <bpf/bpf_helpers.h>
 
 // Map for verification to avoid stack overflow
 // Extended with use_kfunc flag for runtime selection
 struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(type, BPF_MAP_TYPE_ARRAY); //BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
     __type(key, __u32);
     __type(value, struct {
@@ -76,24 +74,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     t2 = bpf_ktime_get_ns();
     #endif
 
-#if 0
-    /* Prefetch SHA256 map entries into cache before any other map accesses.
-     * This keeps sha256_ctx_map and sha256_temp_map warm when SHA runs later,
-     * avoiding cache eviction caused by the intervening header copy loop. */
-    {
-        __u32 sha_key = 0;
-        SHA256_CTX *_sha_ctx __attribute__((unused)) =
-            bpf_map_lookup_elem(&sha256_ctx_map, &sha_key);
-        struct { BYTE buffer[128]; WORD m[64]; } *_sha_tmp __attribute__((unused)) =
-            bpf_map_lookup_elem(&sha256_temp_map, &sha_key);
-    }
-
     #ifdef BPF_DEBUG
     // map lookups
     t3 = bpf_ktime_get_ns();
     #endif
-
-#endif
 
     struct iphdr *ip_header = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
     if ((void *)(ip_header + 1) > data_end)
@@ -204,12 +188,10 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         bpf_printk("Using kfunc SHA256 for verification\n");
         #endif
 
-//        ret = bpf_sha256_keyed_hash(dynamic_key, 64, (const __u8 *)&verify_ctx->original_header,
-//                                   sizeof(struct iphdr), verify_ctx->computed_hash);
         __u8 hdr_stack[sizeof(struct iphdr)];
         __builtin_memcpy(hdr_stack, &verify_ctx->original_header, sizeof(struct iphdr));
         ret = bpf_sha256_keyed_hash(dynamic_key, 64,
-                                   hdr_stack, //(const __u8 *)&verify_ctx->original_header,
+                                   hdr_stack,
                                    sizeof(struct iphdr),
                                    verify_ctx->computed_hash);
 
@@ -229,7 +211,6 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
                                    sizeof(struct iphdr)); 
 
-        //ret = bpf_chacha20poly1305_auth(dynamic_key, 16,
         ret = bpf_chacha20poly1305_auth(dynamic_key, 32, hdr_copy, sizeof(struct iphdr),
                                         verify_ctx->computed_hash);
 
@@ -600,7 +581,8 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
             }
         } else {
             bpf_printk("No IP options found, passing packet through\n");
-            action = XDP_PASS;
+            action = XDP_DROP;
+            //action = XDP_PASS;
         }
     } else if (eth_type == bpf_htons(ETH_P_IPV6)) {
         action = XDP_PASS;

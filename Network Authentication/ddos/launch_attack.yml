@@ -6,11 +6,13 @@
     server_ip: "10.29.1.4"
     server_port: "5201"
     packet_size: "1500"
-    duration: "100"
+    duration: "10000"
     interface: "DATA1"
     cpu: "2"
     udp_client_local: "./udp_client"          # path on control machine
     udp_client_remote: "/usr/local/bin/udp_client"
+    cwd: "/root/Rutgers/Authentication/ddos"
+
     #ansible_user: "root"
     #ansible_ssh_common_args: "-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -o HostKeyAlgorithms=ssh-rsa,ssh-ed25519"
 
@@ -18,6 +20,11 @@
     - name: Check node is reachable
       wait_for_connection:
         timeout: 15
+
+    - name: Install udp_client
+      shell: cd {{ cwd }} && make clean && make && make install
+      args:
+        executable: /bin/bash
 
     - name: Launch udp_client in background
       shell: >
