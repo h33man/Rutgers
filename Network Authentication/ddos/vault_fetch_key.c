@@ -12,7 +12,7 @@
 #include <cjson/cJSON.h>
 
 // Vault / TLS constants
-#define VAULT_CERT_DIR        "/etc/xdp/certs"
+#define VAULT_CERT_DIR        "/etc/liha/certs"
 #define VAULT_CA              VAULT_CERT_DIR "/ca.pem"
 #define VAULT_CLIENT_CRT      VAULT_CERT_DIR "/client.pem"
 #define VAULT_CLIENT_KEY      VAULT_CERT_DIR "/client-key.pem"
