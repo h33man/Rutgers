@@ -34,7 +34,7 @@ write_key() {
     local key="$3"
 
     # Split network into address and prefix — e.g. "10.29.0.0/16"
-    # → path: secret/networks/10.29.0.0/16
+    # → path: secret/data/networks/10.29.0.0/16
     local path="secret/data/networks/${network}"
 
     curl -s \
