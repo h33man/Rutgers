@@ -35,7 +35,7 @@ write_key() {
 
     # Split network into address and prefix — e.g. "10.29.0.0/16"
     # → path: secret/networks/10.29.0.0/16
-    local path="secret/networks/${network}"
+    local path="secret/data/networks/${network}"
 
     curl -s \
         --cacert "$VAULT_CACERT" \
