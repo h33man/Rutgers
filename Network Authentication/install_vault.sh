@@ -137,10 +137,10 @@ vault kv metadata put \
   -mount=secret \
   -custom-metadata=managed=true \
   -delete-version-after=24h \
-  secret/networks
+  secret/data/networks
 
 #Change the expiry using this command
-#vault kv metadata put -delete-version-after=1m  secret/networks
+#vault kv metadata put -delete-version-after=1m  secret/data/networks
 
 #Step 6 Enable TLS Cert Auth and Policy (on 10.20.21.1)
 # Enable cert auth
@@ -185,9 +185,9 @@ sudo chmod 644 /etc/liha/certs/ca.pem /etc/liha/certs/client.pem"
 
 #Step 8 Test the Setup (on 10.20.21.1)
 #Write a test key as the daemon would:
-vault kv put secret/networks/10.29.0.0/16 \
+vault kv put secret/data/networks/10.29.0.0/16 \
   key="4b758f9498d3312616ecc261994376452a3b4c5d6e7f8091a2b3c4d5e6f708191a2b3c4d5e6f708192a3b4c5d6e7f8090a1b2c3d4e5f60718293a4b5c6d7e8f9"
-vault kv get secret/networks/10.29.0.0/16
+vault kv get secret/data/networks/10.29.0.0/16
 
 #Test cert auth from the client machine (10.29.1.6):
 curl --cacert /etc/liha/certs/ca.pem \
