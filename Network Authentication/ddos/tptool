@@ -1,0 +1,24 @@
+#!/bin/bash
+IFACE="enp175s0f0np0"
+
+prev_rx=$(ethtool -S $IFACE | awk '/rx_bytes/{print $2; exit}')
+prev_tx=$(ethtool -S $IFACE | awk '/tx_bytes/{print $2; exit}')
+prev_time=$(date +%s%N)
+
+while true; do
+    sleep 1
+    curr_rx=$(ethtool -S $IFACE | awk '/rx_bytes/{print $2; exit}')
+    curr_tx=$(ethtool -S $IFACE | awk '/tx_bytes/{print $2; exit}')
+    curr_time=$(date +%s%N)
+
+    dt=$(( (curr_time - prev_time) ))  # nanoseconds
+
+    rx_gbps=$(awk "BEGIN {printf \"%.2f\", ($curr_rx - $prev_rx) * 8 / $dt}")
+    tx_gbps=$(awk "BEGIN {printf \"%.2f\", ($curr_tx - $prev_tx) * 8 / $dt}")
+
+    echo "$(date '+%H:%M:%S')  RX: ${rx_gbps} Gbps  TX: ${tx_gbps} Gbps"
+
+    prev_rx=$curr_rx
+    prev_tx=$curr_tx
+    prev_time=$curr_time
+done
