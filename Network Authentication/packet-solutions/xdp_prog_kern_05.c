@@ -12,13 +12,14 @@
 /*************************** HEADER FILES ***************************/
 #include "sha256.h"
 #include "chacha20_kfunc.h"
-
 #include <bpf/bpf_helpers.h>
+
+//extern __u8 debug;
 
 // Map for verification to avoid stack overflow
 // Extended with use_kfunc flag for runtime selection
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY); //BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
     __type(key, __u32);
     __type(value, struct {
@@ -74,10 +75,24 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
     t2 = bpf_ktime_get_ns();
     #endif
 
+#if 0
+    /* Prefetch SHA256 map entries into cache before any other map accesses.
+     * This keeps sha256_ctx_map and sha256_temp_map warm when SHA runs later,
+     * avoiding cache eviction caused by the intervening header copy loop. */
+    {
+        __u32 sha_key = 0;
+        SHA256_CTX *_sha_ctx __attribute__((unused)) =
+            bpf_map_lookup_elem(&sha256_ctx_map, &sha_key);
+        struct { BYTE buffer[128]; WORD m[64]; } *_sha_tmp __attribute__((unused)) =
+            bpf_map_lookup_elem(&sha256_temp_map, &sha_key);
+    }
+#endif
+
     #ifdef BPF_DEBUG
     // map lookups
     t3 = bpf_ktime_get_ns();
     #endif
+
 
     struct iphdr *ip_header = (struct iphdr *)(data + ETHERNET_HEADER_SIZE);
     if ((void *)(ip_header + 1) > data_end)
@@ -337,17 +352,17 @@ static __always_inline int add_ip_option_hash(struct xdp_md *ctx,
     } *hash_ctx;
 
     hash_ctx = bpf_map_lookup_elem(&kfunc_hash_map, &key);
-    if (hash_ctx) {
-        // Try to use kfunc - if available, compute hash using kfunc
+    if (!hash_ctx) {
         #ifdef BPF_DEBUG 
-        bpf_printk("Attempting to compute hash using kfunc\n");
+        //bpf_printk("Attempting to compute hash using custom sha\n");
+        bpf_printk("Using custom SHA256 for hash addition\n");
         #endif
 
         struct iphdr *header_copy = (struct iphdr *)(headers_copy + ETHERNET_HEADER_SIZE);
         header_copy->check = 0;
 
-        ret = bpf_sha256_keyed_hash(dynamic_key, 64, (const __u8 *)header_copy, sizeof(*header_copy),
-                                    hash_ctx->hash_output);
+        ret = compute_keyed_hash_from_map_dynamic((const __u8 *)header_copy, sizeof(*header_copy),
+                                    hash_ctx->hash_output, dynamic_key);
         if (ret == 0) {
             #ifdef BPF_DEBUG 
             bpf_printk("Using kfunc SHA256 for hash addition\n");
@@ -581,8 +596,7 @@ int xdp_ip_hash_verify_func(struct xdp_md *ctx)
             }
         } else {
             bpf_printk("No IP options found, passing packet through\n");
-            action = XDP_DROP;
-            //action = XDP_PASS;
+            action = XDP_PASS;
         }
     } else if (eth_type == bpf_htons(ETH_P_IPV6)) {
         action = XDP_PASS;
@@ -685,24 +699,50 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
 
         // Runtime selection: use kfunc or custom SHA256 based on use_kfunc flag
         int ret = 0;
-        if (config_ctx->use_kfunc) {
-            // Use kernel SHA256 kfunc
-            #ifdef BPF_DEBUG 
-            bpf_printk("Using kfunc SHA256 for verification\n");
-            #endif
-
-            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
-                           (BYTE *)iphdr,
-                           header_size,
-                           hash_result);
-        } else {
+        if (config_ctx->use_kfunc == 0) {
             // Use custom SHA256 implementation
             #ifdef BPF_DEBUG 
             bpf_printk("Using custom SHA256 for verification\n");
             #endif
 
-            ret = compute_keyed_hash_from_map_dynamic((BYTE *)iphdr, header_size,
-                                                           hash_result, auth_data->key);
+            ret = compute_keyed_hash_from_map_dynamic((BYTE *)&verify_ctx->original_header,
+                                 sizeof(struct iphdr), verify_ctx->computed_hash, auth_data->key);
+        }
+        else if (config_ctx->use_kfunc == 1) {
+            // Use kernel SHA256 kfunc
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using kfunc SHA256 for verification\n");
+            #endif
+
+            __u8 hdr_stack[sizeof(struct iphdr)];
+            __builtin_memcpy(hdr_stack, &verify_ctx->original_header, sizeof(struct iphdr));
+            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
+                                       hdr_stack, 
+                                       sizeof(struct iphdr),
+                                       verify_ctx->computed_hash);
+
+        }
+        else if (config_ctx->use_kfunc == 2) {
+            // Use custom CHACHA20-POLY1305 implementation
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
+            #endif
+
+            /* Copy to stack buffer - verifier can track bounds on stack */
+            __u8 hdr_copy[60] = {};
+            if (header_size > 60)
+                header_size = 60;
+
+            /* XDP uses __builtin_memcpy not bpf_skb_load_bytes */
+            __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
+                                       sizeof(struct iphdr)); 
+
+            ret = bpf_chacha20poly1305_auth(auth_data->key, 32, hdr_copy, sizeof(struct iphdr),
+                                            verify_ctx->computed_hash);
+
+        }
+        else {
+            bpf_printk("Invalid option for hash\n");
         }
 
         if (ret == 0) {

@@ -198,7 +198,7 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
 
         // Only processing UDP
         if (iphdr->protocol != IPPROTO_UDP) {
-            bpf_printk("Not a UDP packet, passing through\n");
+            //bpf_printk("Not a UDP packet, passing through\n");
             action = TC_ACT_OK;
             goto out;
         }
@@ -216,7 +216,7 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
 
         struct ip_auth_data *auth_data = lookup_auth_key(iphdr->saddr);
         if (!auth_data) {
-            bpf_printk("No authentication key found for source IP, passing without hash\n");
+            //bpf_printk("No authentication key found for source IP, passing without hash\n");
             action = TC_ACT_OK;
             goto out;
         }

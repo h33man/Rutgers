@@ -129,7 +129,26 @@ def plot_bandwidth_vs_cpu(data_by_packet_size, output_file, ebpf_delay_ns=None):
                 label=f'{packet_size} bytes', 
                 linewidth=2, 
                 markersize=6)
+        """
+       eb1 = ax.errorbar(self.packet_sizes, no_auth_rtt, yerr=no_auth_std,
+               fmt='o-', linewidth=2.5, markersize=8, label='No Authentication',
+               color='#4169E1', alpha=0.8, capsize=5, capthick=1.5,
+               elinewidth=1.5, ecolor='gray')
+        ax.errorbar(cpu_usage, bandwidths, yerr=bw_stds,
+                alpha=0.8,
+                marker=marker,
+                linestyle='-',
+                color=color,
+                label=f'{packet_size} bytes', 
+                linewidth=2, 
+                markersize=6)
 
+        ax.errorbar(cpu_usage, bandwidths, yerr=bw_stds, linestyle='-',
+                    marker=marker, markersize=6, linewidth=2, capsize=4,
+                    label=f'{packet_size} bytes', color=color, alpha=0.85,
+                    markeredgewidth=1.5, markeredgecolor='white')
+        """
+    
     # Add vertical line for eBPF authentication delay
     if ebpf_delay_ns is not None:
         ax.axvline(x=ebpf_delay_ns, color='red', linestyle='--', linewidth=2.5, 
@@ -140,14 +159,15 @@ def plot_bandwidth_vs_cpu(data_by_packet_size, output_file, ebpf_delay_ns=None):
                 color='red', fontsize=10, fontweight='bold', 
                 verticalalignment='top')
     
-    ax.set_xlabel('Added CPU Usage (ns)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Bandwidth (Mbps)', fontsize=14, fontweight='bold')
-    ax.set_title('Bandwidth vs CPU Processing Overhead', fontsize=16, fontweight='bold', pad=20)
-    ax.legend(title='Packet Size', fontsize=10, title_fontsize=11, loc='best', 
+    ax.set_xlabel('Added CPU Usage (ns)', fontsize=16, fontweight='bold')
+    ax.set_ylabel('Bandwidth (Mbps)', fontsize=16, fontweight='bold')
+    ax.set_title('Bandwidth vs CPU Processing Overhead', fontsize=18, fontweight='bold', pad=20)
+    ax.legend(title='Packet Size', fontsize=13, title_fontsize=13, loc='best', 
               ncol=2, framealpha=0.95)
     ax.grid(True, alpha=0.3, linestyle='--')
     
     # Format x-axis to show values nicely
+    ax.tick_params(axis='both', labelsize=14)
     ax.ticklabel_format(style='plain', axis='x')
     
     plt.tight_layout()
@@ -185,6 +205,7 @@ def plot_rtt_vs_cpu(data_by_packet_size, output_file, ebpf_delay_ns=None):
         marker = 'o' #markers[idx % len(markers)]
         
         # FIX: Use proper keyword arguments for color
+        """
         ax.plot(cpu_usage, rtts,
                 marker=marker,
                 linestyle='-',
@@ -192,7 +213,12 @@ def plot_rtt_vs_cpu(data_by_packet_size, output_file, ebpf_delay_ns=None):
                 label=f'{packet_size} bytes', 
                 linewidth=2, 
                 markersize=6)
-
+        """
+        ax.errorbar(cpu_usage, rtts, yerr=rtt_stds, linestyle='-',
+                    marker=marker, markersize=6, linewidth=2, capsize=4,
+                    label=f'{packet_size} bytes', color=color, alpha=0.85,
+                    markeredgewidth=1.5, markeredgecolor='white')
+    
     # Add vertical line for eBPF authentication delay
     if ebpf_delay_ns is not None:
         ax.axvline(x=ebpf_delay_ns, color='red', linestyle='--', linewidth=2.5, 
@@ -203,15 +229,16 @@ def plot_rtt_vs_cpu(data_by_packet_size, output_file, ebpf_delay_ns=None):
                 color='red', fontsize=10, fontweight='bold',
                 verticalalignment='top')
     
-    ax.set_xlabel('Added CPU Usage (ns)', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Added CPU Usage (ns)', fontsize=16, fontweight='bold')
     #ax.set_ylabel('Round Trip Time (µs)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Round Trip Time (ms)', fontsize=14, fontweight='bold')
-    ax.set_title('RTT vs CPU Processing Overhead', fontsize=16, fontweight='bold', pad=20)
-    ax.legend(title='Packet Size', fontsize=10, title_fontsize=11, loc='best',
+    ax.set_ylabel('Round Trip Time (ms)', fontsize=16, fontweight='bold')
+    ax.set_title('RTT vs CPU Processing Overhead', fontsize=18, fontweight='bold', pad=20)
+    ax.legend(title='Packet Size', fontsize=13, title_fontsize=13, loc='best',
               ncol=2, framealpha=0.95)
     ax.grid(True, alpha=0.3, linestyle='--')
     
     # Format x-axis to show values nicely
+    ax.tick_params(axis='both', labelsize=14)
     ax.ticklabel_format(style='plain', axis='x')
     
     plt.tight_layout()
@@ -417,9 +444,9 @@ Example:
     
     # Generate plots
     print("\nGenerating plots...")
-    plot_bandwidth_vs_cpu(data_by_packet_size, f"bandwidth_comparison.png", args.ebpf_delay)
-    plot_rtt_vs_cpu(data_by_packet_size, f"rtt_comparison.png", args.ebpf_delay)
-    plot_combined(data_by_packet_size, f"combined_comparison.png", args.ebpf_delay)
+    plot_bandwidth_vs_cpu(data_by_packet_size, f"bandwidth_comparison_art.png", args.ebpf_delay)
+    plot_rtt_vs_cpu(data_by_packet_size, f"rtt_comparison_art.png", args.ebpf_delay)
+    plot_combined(data_by_packet_size, f"combined_comparison_art.png", args.ebpf_delay)
     
     # Print summary
     print_summary(data_by_packet_size, args.ns_per_loop)

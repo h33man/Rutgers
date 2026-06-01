@@ -27,6 +27,7 @@ class BenchmarkPlotter:
             'no_auth': '#87CEEB',      # Light blue
             'ebpf_auth': '#DDA0DD',    # Plum
             'kernel_auth': '#F0B6C1',  # Light pink
+            'crypto_auth': '#FF8C00',  # Orange
             'chacha_auth': '#98FB98'   # Pale green
         }
         
@@ -84,6 +85,7 @@ class BenchmarkPlotter:
     
     def plot_bandwidth_comparison(self) -> plt.Figure:
         """Create bandwidth comparison plot with four phases using log scale and error bars."""
+        plt.rcParams.update({'font.size': 14})
         fig, ax = plt.subplots(figsize=(14, 8))
         
         # Extract data for all four phases
@@ -91,49 +93,58 @@ class BenchmarkPlotter:
         ebpf_auth_bw = self.extract_data_arrays('ebpf_auth', 'bandwidth')
         kernel_auth_bw = self.extract_data_arrays('kernel_auth', 'bandwidth')
         chacha_auth_bw = self.extract_data_arrays('chacha_auth', 'bandwidth')
+        crypto_auth_bw = self.extract_data_arrays('crypto_auth', 'bandwidth')
         
         # Extract standard deviations
         no_auth_std = self.extract_data_arrays('no_auth', 'bandwidth_std')
         ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'bandwidth_std')
         kernel_auth_std = self.extract_data_arrays('kernel_auth', 'bandwidth_std')
         chacha_auth_std = self.extract_data_arrays('chacha_auth', 'bandwidth_std')
+        crypto_auth_std = self.extract_data_arrays('crypto_auth', 'bandwidth_std')
         
         # Convert packet sizes to log2 for equal spacing
         x_positions = np.arange(len(self.packet_sizes))
         width = 0.15 # Adjusted for 4 bars
         
         # Create bars for four phases with error bars
-        bars1 = ax.bar(x_positions - 1.5*width, no_auth_bw, width,
+        bars1 = ax.bar(x_positions - 2.0*width, no_auth_bw, width,
                       yerr=no_auth_std, label='No Authentication', 
                       color=self.colors['no_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
-        bars2 = ax.bar(x_positions - 0.5*width, ebpf_auth_bw, width,
+        bars2 = ax.bar(x_positions - 1.0*width, ebpf_auth_bw, width,
                       yerr=ebpf_auth_std, label='eBPF SHA-256 Auth',
                       color=self.colors['ebpf_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
-        bars3 = ax.bar(x_positions + 0.5*width, kernel_auth_bw, width,
-                      yerr=kernel_auth_std, label='Kernel Authentication',
+        bars3 = ax.bar(x_positions + 0.0*width, kernel_auth_bw, width,
+                      yerr=kernel_auth_std, label='Kernel SHA-256 Auth',
                       color=self.colors['kernel_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
 
-        bars4 = ax.bar(x_positions + 1.5*width, chacha_auth_bw, width,
+        bars4 = ax.bar(x_positions + 1.0*width, crypto_auth_bw, width,
+                      yerr=ebpf_auth_std, label='Crypto SHA-256 Auth',
+                      color=self.colors['crypto_auth'], alpha=0.8, edgecolor='black', 
+                      linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
+        
+        bars5 = ax.bar(x_positions + 2.0*width, chacha_auth_bw, width,
                       yerr=chacha_auth_std, label='ChaCha20 Authentication',
                       color=self.colors['chacha_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
         # Customize plot
-        ax.set_xlabel('Packet Size (bytes)', fontweight='bold')
-        ax.set_ylabel('Bandwidth (Mbps)', fontweight='bold')
-        ax.set_title('Bandwidth Vs Packet Size', fontweight='bold', pad=20)
+        ax.set_xlabel('Packet Size (bytes)', fontweight='bold', fontsize=16)
+        ax.set_ylabel('Bandwidth (Mbps)', fontweight='bold', fontsize=16)
+        ax.set_title('Bandwidth Vs Packet Size', fontweight='bold', pad=20, fontsize=18)
         
         # Set x-axis labels with logarithmic spacing
+        ax.tick_params(axis='both', labelsize=14)
+
         ax.set_xticks(x_positions)
-        ax.set_xticklabels([str(size) for size in self.packet_sizes])
+        ax.set_xticklabels([str(size) for size in self.packet_sizes], fontsize=14)
         
         # Add legend
-        ax.legend(loc='upper left', framealpha=0.9)
+        ax.legend(loc='upper left', framealpha=0.9, fontsize=13)
         
         # Add grid
         ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
@@ -145,40 +156,48 @@ class BenchmarkPlotter:
     
     def plot_rtt_comparison2(self) -> plt.Figure:
         """Create RTT comparison plot with four phases using log scale and error bars."""
+        plt.rcParams.update({'font.size': 14})
         fig, ax = plt.subplots(figsize=(14, 8))
         
         # Extract data for all four phases
         no_auth_rtt = self.extract_data_arrays('no_auth', 'rtt')
         ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt')
         kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt')
+        crypto_auth_rtt = self.extract_data_arrays('crypto_auth', 'rtt')
         chacha_auth_rtt = self.extract_data_arrays('chacha_auth', 'rtt')
         
         # Extract standard deviations
         no_auth_std = self.extract_data_arrays('no_auth', 'rtt_std')
         ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'rtt_std')
         kernel_auth_std = self.extract_data_arrays('kernel_auth', 'rtt_std')
+        crypto_auth_std = self.extract_data_arrays('crypto_auth', 'rtt_std')
         chacha_auth_std = self.extract_data_arrays('chacha_auth', 'rtt_std')
         
         x_positions = np.arange(len(self.packet_sizes))
         width = 0.15 # Adjusted for 4 bars
         
         # Create bars
-        bars1 = ax.bar(x_positions - 1.5*width, no_auth_rtt, width,
+        bars1 = ax.bar(x_positions - 2.0*width, no_auth_rtt, width,
                       yerr=no_auth_std, label='No Authentication', 
                       color=self.colors['no_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
-        bars2 = ax.bar(x_positions - 0.5*width, ebpf_auth_rtt, width,
+        bars2 = ax.bar(x_positions - 1.0*width, ebpf_auth_rtt, width,
                       yerr=ebpf_auth_std, label='eBPF SHA-256 Auth',
                       color=self.colors['ebpf_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
         
-        bars3 = ax.bar(x_positions + 0.5*width, kernel_auth_rtt, width,
-                      yerr=kernel_auth_std, label='Kernel Authentication',
+        bars3 = ax.bar(x_positions + 0.0*width, kernel_auth_rtt, width,
+                      yerr=kernel_auth_std, label='Kernel SHA-256 Auth',
                       color=self.colors['kernel_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
 
-        bars4 = ax.bar(x_positions + 1.5*width, chacha_auth_rtt, width,
+        bars4 = ax.bar(x_positions + 1.0*width, ebpf_auth_rtt, width,
+                      yerr=ebpf_auth_std, label='Crypto SHA-256 Auth',
+                      color=self.colors['crypto_auth'], alpha=0.8, edgecolor='black', 
+                      linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
+        
+        bars5 = ax.bar(x_positions + 2.0*width, chacha_auth_rtt, width,
                       yerr=chacha_auth_std, label='ChaCha20 Authentication',
                       color=self.colors['chacha_auth'], alpha=0.8, edgecolor='black', 
                       linewidth=0.5, capsize=5, error_kw={'linewidth': 1.5, 'ecolor': 'gray'})
@@ -205,18 +224,21 @@ class BenchmarkPlotter:
 
     def plot_rtt_comparison(self) -> plt.Figure:
         """Create RTT comparison plot for four phases with log x-scale but clean numeric labels."""
+        plt.rcParams.update({'font.size': 14})
         fig, ax = plt.subplots(figsize=(14, 8))
 
         # Extract RTT data
         no_auth_rtt = self.extract_data_arrays('no_auth', 'rtt') / 1000
         ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt') / 1000
         kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt') / 1000
+        crypto_auth_rtt = self.extract_data_arrays('crypto_auth', 'rtt') / 1000
         chacha_auth_rtt = self.extract_data_arrays('chacha_auth', 'rtt') / 1000
 
         # Extract standard deviations
         no_auth_std = self.extract_data_arrays('no_auth', 'rtt_std') / 1000
         ebpf_auth_std = self.extract_data_arrays('ebpf_auth', 'rtt_std') / 1000
         kernel_auth_std = self.extract_data_arrays('kernel_auth', 'rtt_std') / 1000
+        crypto_auth_std = self.extract_data_arrays('crypto_auth', 'rtt_std') / 1000
         chacha_auth_std = self.extract_data_arrays('chacha_auth', 'rtt_std') / 1000
 
         # X labels
@@ -238,29 +260,35 @@ class BenchmarkPlotter:
 
         eb3 = ax.errorbar(self.packet_sizes, kernel_auth_rtt, yerr=kernel_auth_std,
                fmt='^-', linewidth=2.5, markersize=8, label='Kernel SHA-256 Auth',
+               color='#F0B6C1', alpha=0.8, capsize=5, capthick=1.5,
+               elinewidth=1.5, ecolor='gray')
+
+        eb4 = ax.errorbar(self.packet_sizes, crypto_auth_rtt, yerr=crypto_auth_std,
+               fmt='v-', linewidth=2.5, markersize=8, label='Crypto SHA-256 Auth',
                color='#FF8C00', alpha=0.8, capsize=5, capthick=1.5,
                elinewidth=1.5, ecolor='gray')
 
-        eb4 = ax.errorbar(self.packet_sizes, chacha_auth_rtt, yerr=chacha_auth_std,
+        eb5 = ax.errorbar(self.packet_sizes, chacha_auth_rtt, yerr=chacha_auth_std,
                fmt='d-', linewidth=2.5, markersize=8, label='Kernel ChaCha20 Auth',
                color='#32CD32', alpha=0.8, capsize=5, capthick=1.5,
                elinewidth=1.5, ecolor='gray') # LimeGreen
 
         # Customize plot
-        ax.set_xlabel('Packet Size (bytes)', fontweight='bold')
-        ax.set_ylabel('Round Trip Time (ms)', fontweight='bold')
-        ax.set_title('Round Trip Time Vs Packet Size', fontweight='bold', pad=20)
+        ax.set_xlabel('Packet Size (bytes)', fontweight='bold', fontsize=16)
+        ax.set_ylabel('Round Trip Time (ms)', fontweight='bold', fontsize=16)
+        ax.set_title('Round Trip Time Vs Packet Size', fontweight='bold', fontsize=18, pad=20)
 
         # Logarithmic X-scale, but pretty labels
         ax.set_xscale('log')
+        ax.tick_params(axis='both', labelsize=14)
         ax.set_xticks(self.packet_sizes)
-        ax.set_xticklabels(x_labels)
+        ax.set_xticklabels(x_labels, fontsize=14)
 
         # Add legend - show only the line/marker handle, not the error bar artists
-        handles = [eb1[0], eb2[0], eb3[0], eb4[0]]
-        labels  = ['No Authentication', 'eBPF SHA-256 Auth',
-                   'Kernel SHA-256 Auth', 'Kernel ChaCha20 Auth']
-        ax.legend(handles, labels, loc='best', framealpha=0.9)
+        handles = [eb1[0], eb2[0], eb3[0], eb4[0], eb5[0]]
+        labels  = ['No Authentication', 'eBPF SHA-256 Auth', 'Kernel SHA-256 Auth', 
+                   'Crypto SHA-256 Auth', 'Kernel ChaCha20 Auth']
+        ax.legend(handles, labels, loc='best', framealpha=0.9, fontsize=13)
 
         # Grid and formatting
         ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
@@ -278,11 +306,13 @@ class BenchmarkPlotter:
         no_auth_bw = self.extract_data_arrays('no_auth', 'bandwidth')
         ebpf_auth_bw = self.extract_data_arrays('ebpf_auth', 'bandwidth')
         kernel_auth_bw = self.extract_data_arrays('kernel_auth', 'bandwidth')
+        crypto_auth_bw = self.extract_data_arrays('crypto_auth', 'bandwidth')
         chacha_auth_bw = self.extract_data_arrays('chacha_auth', 'bandwidth')
         
         no_auth_rtt = self.extract_data_arrays('no_auth', 'rtt')
         ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt')
         kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt')
+        crypto_auth_rtt = self.extract_data_arrays('crypto_auth', 'rtt')
         chacha_auth_rtt = self.extract_data_arrays('chacha_auth', 'rtt')
         
         # Calculate impacts
@@ -292,6 +322,9 @@ class BenchmarkPlotter:
         kernel_bw_impact = np.where(no_auth_bw > 0, ((no_auth_bw - kernel_auth_bw) / no_auth_bw) * 100, 0)
         kernel_rtt_impact = np.where(no_auth_rtt > 0, ((kernel_auth_rtt - no_auth_rtt) / no_auth_rtt) * 100, 0)
 
+        crypto_bw_impact = np.where(no_auth_bw > 0, ((no_auth_bw - crypto_auth_bw) / no_auth_bw) * 100, 0)
+        crypto_rtt_impact = np.where(no_auth_rtt > 0, ((crypto_auth_rtt - no_auth_rtt) / no_auth_rtt) * 100, 0)
+        
         chacha_bw_impact = np.where(no_auth_bw > 0, ((no_auth_bw - chacha_auth_bw) / no_auth_bw) * 100, 0)
         chacha_rtt_impact = np.where(no_auth_rtt > 0, ((chacha_auth_rtt - no_auth_rtt) / no_auth_rtt) * 100, 0)
         
@@ -335,7 +368,29 @@ class BenchmarkPlotter:
         ax4.grid(True, alpha=0.3)
         ax4.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
 
-        # Plot 5: Chacha Bandwidth Impact
+        # Plot 5: Crypto Bandwidth Impact
+        ax5.plot(self.packet_sizes, crypto_bw_impact, 'v-', linewidth=2.5, markersize=8, color=self.colors['crypto_auth'], alpha=0.8)
+        ax5.set_xscale('log')
+        ax5.set_xticks(self.packet_sizes)
+        ax5.set_xticklabels([str(size) for size in self.packet_sizes])
+        ax5.set_title('Crypto: Bandwidth Overhead vs Baseline', fontweight='bold')
+        ax5.set_xlabel('Packet Size (bytes)')
+        ax5.set_ylabel('Overhead (%)')
+        ax5.grid(True, alpha=0.3)
+        ax5.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+
+        # Plot 6: Crypto RTT Impact
+        ax6.plot(self.packet_sizes, crypto_rtt_impact, 'v-', linewidth=2.5, markersize=8, color=self.colors['crypto_auth'], alpha=0.8)
+        ax6.set_xscale('log')
+        ax6.set_xticks(self.packet_sizes)
+        ax6.set_xticklabels([str(size) for size in self.packet_sizes])
+        ax6.set_title('Crypto: RTT Overhead vs Baseline', fontweight='bold')
+        ax6.set_xlabel('Packet Size (bytes)')
+        ax6.set_ylabel('Overhead (%)')
+        ax6.grid(True, alpha=0.3)
+        ax6.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+        
+        # Plot 7: Chacha Bandwidth Impact
         ax5.plot(self.packet_sizes, chacha_bw_impact, 'd-', linewidth=2.5, markersize=8, color=self.colors['chacha_auth'], alpha=0.8)
         ax5.set_xscale('log')
         ax5.set_xticks(self.packet_sizes)
@@ -346,7 +401,7 @@ class BenchmarkPlotter:
         ax5.grid(True, alpha=0.3)
         ax5.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
 
-        # Plot 6: Chacha RTT Impact
+        # Plot 8: Chacha RTT Impact
         ax6.plot(self.packet_sizes, chacha_rtt_impact, 'd-', linewidth=2.5, markersize=8, color=self.colors['chacha_auth'], alpha=0.8)
         ax6.set_xscale('log')
         ax6.set_xticks(self.packet_sizes)
@@ -397,11 +452,13 @@ class BenchmarkPlotter:
         no_auth_bw = self.extract_data_arrays('no_auth', 'bandwidth')
         ebpf_auth_bw = self.extract_data_arrays('ebpf_auth', 'bandwidth')
         kernel_auth_bw = self.extract_data_arrays('kernel_auth', 'bandwidth')
+        crypto_auth_bw = self.extract_data_arrays('crypto_auth', 'bandwidth')
         chacha_auth_bw = self.extract_data_arrays('chacha_auth', 'bandwidth')
         
         no_auth_rtt = self.extract_data_arrays('no_auth', 'rtt')
         ebpf_auth_rtt = self.extract_data_arrays('ebpf_auth', 'rtt')
         kernel_auth_rtt = self.extract_data_arrays('kernel_auth', 'rtt')
+        crypto_auth_rtt = self.extract_data_arrays('crypto_auth', 'rtt')
         chacha_auth_rtt = self.extract_data_arrays('chacha_auth', 'rtt')
         
         report = []
@@ -417,6 +474,7 @@ class BenchmarkPlotter:
             avg_no_auth_bw = np.mean(no_auth_bw[no_auth_bw > 0])
             avg_ebpf_bw = np.mean(ebpf_auth_bw[ebpf_auth_bw > 0]) if len(ebpf_auth_bw[ebpf_auth_bw > 0]) > 0 else 0
             avg_kernel_bw = np.mean(kernel_auth_bw[kernel_auth_bw > 0]) if len(kernel_auth_bw[kernel_auth_bw > 0]) > 0 else 0
+            avg_crypto_bw = np.mean(crypto_auth_bw[crypto_auth_bw > 0]) if len(crypto_auth_bw[crypto_auth_bw > 0]) > 0 else 0
             avg_chacha_bw = np.mean(chacha_auth_bw[chacha_auth_bw > 0]) if len(chacha_auth_bw[chacha_auth_bw > 0]) > 0 else 0
             
             report.append(f"Baseline (No Auth):         {avg_no_auth_bw:>8.2f} Mbps (reference)")
@@ -424,6 +482,8 @@ class BenchmarkPlotter:
                 report.append(f"eBPF Authentication:       {avg_ebpf_bw:>8.2f} Mbps ({(1 - avg_ebpf_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
             if avg_kernel_bw > 0:
                 report.append(f"Kernel Authentication:     {avg_kernel_bw:>8.2f} Mbps ({(1 - avg_kernel_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
+            if avg_crypto_bw > 0:
+                report.append(f"Crypto Authentication:     {avg_crypto_bw:>8.2f} Mbps ({(1 - avg_crypto_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
             if avg_chacha_bw > 0:
                 report.append(f"Chacha Authentication:     {avg_chacha_bw:>8.2f} Mbps ({(1 - avg_chacha_bw/avg_no_auth_bw)*100:>6.1f}% overhead)")
         
@@ -435,6 +495,7 @@ class BenchmarkPlotter:
             avg_no_auth_rtt = np.mean(no_auth_rtt[no_auth_rtt > 0])
             avg_ebpf_rtt = np.mean(ebpf_auth_rtt[ebpf_auth_rtt > 0]) if len(ebpf_auth_rtt[ebpf_auth_rtt > 0]) > 0 else 0
             avg_kernel_rtt = np.mean(kernel_auth_rtt[kernel_auth_rtt > 0]) if len(kernel_auth_rtt[kernel_auth_rtt > 0]) > 0 else 0
+            avg_crypto_rtt = np.mean(crypto_auth_rtt[crypto_auth_rtt > 0]) if len(crypto_auth_rtt[crypto_auth_rtt > 0]) > 0 else 0
             avg_chacha_rtt = np.mean(chacha_auth_rtt[chacha_auth_rtt > 0]) if len(chacha_auth_rtt[chacha_auth_rtt > 0]) > 0 else 0
 
             report.append(f"Baseline (No Auth):         {avg_no_auth_rtt:>8.3f} ms (reference)")
@@ -442,6 +503,8 @@ class BenchmarkPlotter:
                 report.append(f"eBPF Authentication:       {avg_ebpf_rtt:>8.3f} ms ({(avg_ebpf_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
             if avg_kernel_rtt > 0:
                 report.append(f"Kernel Authentication:     {avg_kernel_rtt:>8.3f} ms ({(avg_kernel_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
+            if avg_crypto_rtt > 0:
+                report.append(f"Crypto Authentication:     {avg_crypto_rtt:>8.3f} ms ({(avg_crypto_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
             if avg_chacha_rtt > 0:
                 report.append(f"Chacha Authentication:     {avg_chacha_rtt:>8.3f} ms ({(avg_chacha_rtt/avg_no_auth_rtt - 1)*100:>6.1f}% overhead)")
         
@@ -454,7 +517,7 @@ class BenchmarkPlotter:
         report.append("-" * 90)
         
         for i, size in enumerate(self.packet_sizes):
-            report.append(f"{size:<8} {no_auth_bw[i]:>8.2f}  {ebpf_auth_bw[i]:>8.2f}  {kernel_auth_bw[i]:>8.2f}  {chacha_auth_bw[i]:>8.2f}  {ebpf_auth_rtt[i]:>8.3f}  {kernel_auth_rtt[i]:>8.3f}  {chacha_auth_rtt[i]:>8.3f}")
+            report.append(f"{size:<8} {no_auth_bw[i]:>8.2f}  {ebpf_auth_bw[i]:>8.2f}  {kernel_auth_bw[i]:>8.2f}  {crypto_auth_bw[i]:>8.2f} {chacha_auth_bw[i]:>8.2f}  {ebpf_auth_rtt[i]:>8.3f}  {kernel_auth_rtt[i]:>8.3f}  {crypto_auth_rtt[i]:>8.3f} {chacha_auth_rtt[i]:>8.3f}")
         
         return "\n".join(report)
 

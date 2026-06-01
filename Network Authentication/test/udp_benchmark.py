@@ -75,7 +75,7 @@ class HybridBenchmark:
         print(f"\nRunning bandwidth test (iperf3)...")
         print(f"  Duration: {self.duration} seconds per run")
         print(f"  Packet size: {self.packet_size} bytes")
-        print(f"  Running 3 iterations for std dev...")
+        print(f"  Running 32 iterations for std dev...")
         
         sender_bandwidths = []
         receiver_bandwidths = []
@@ -84,7 +84,7 @@ class HybridBenchmark:
         loss_percentages = []
         
         # Run 3 iterations for standard deviation
-        for run in range(3):
+        for run in range(32):
             cmd = [
                 "iperf3", "-c", self.dst_ip,
                 "-p", str(self.iperf_port),
@@ -318,6 +318,12 @@ def write_json_results(filename, dst_ip, packet_size, duration,
                     "rtt": {}, "rtt_std": {}, "rtt_min": {}, "rtt_max": {}, 
                     "packets_sent": {}, "packets_received": {}, "packet_loss_percent": {}
                 },
+                "crypto_auth": {
+                    "bandwidth": {}, "bandwidth_std": {}, 
+                    "receiver_bandwidth": {}, "receiver_bandwidth_std": {},
+                    "rtt": {}, "rtt_std": {}, "rtt_min": {}, "rtt_max": {}, 
+                    "packets_sent": {}, "packets_received": {}, "packet_loss_percent": {}
+                },
                 "chacha_auth": {
                     "bandwidth": {}, "bandwidth_std": {}, 
                     "receiver_bandwidth": {}, "receiver_bandwidth_std": {},
@@ -400,7 +406,7 @@ Requirements:
     parser.add_argument("-o", "--output", default="udp_benchmark_results.json",
                        help="Output JSON file (default: udp_benchmark_results.json)")
     parser.add_argument("-a", "--phase", nargs='+', default=['no_auth'],
-                       help="Phase: no_auth, ebpf_auth, kernel_auth, chacha_auth, or 'art_delay N'")
+                       help="Phase: no_auth, ebpf_auth, kernel_auth, crypto_auth, chacha_auth, or 'art_delay N'")
     
     args = parser.parse_args()
     

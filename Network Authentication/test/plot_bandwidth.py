@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Plot bandwidth distribution comparing:
-  - Client sockperf results (blue bars)
-  - Server tcpdump throughput results (transparent red bars)
-Produces a single image with subplots for each packet size.
+Plot bandwidth distribution from iperf3 results
+Shows sender (client) and receiver (server) from same file
 """
 
 import json
@@ -14,112 +12,67 @@ import os
 
 
 class BandwidthPlotter:
-    def __init__(self, client_file, server_file, bucket_size=10):
-        self.client_file = client_file
-        self.server_file = server_file
+    def __init__(self, data_file, bucket_size=10):
+        self.data_file = data_file
         self.bucket_size = bucket_size
-        self.client_datasets = []
-        self.server_datasets = []
+        self.datasets = []
 
-    # ---------------------------------------------------------
-    def load_client_data(self):
-        with open(self.client_file, "r") as f:
+        # Style settings
+        plt.rcParams.update({
+            'font.size': 14,
+            'axes.titlesize': 16,
+            'axes.labelsize': 16,
+            'xtick.labelsize': 14,
+            'ytick.labelsize': 14,
+            'legend.fontsize': 13,
+            'figure.titlesize': 18
+        })
+    
+    def load_data(self):
+        """Load data file containing both sender and receiver bandwidth"""
+        with open(self.data_file, "r") as f:
             data = json.load(f)
 
         if isinstance(data, dict):
-            self.client_datasets = [data]
+            self.datasets = [data]
         else:
-            self.client_datasets = data
+            self.datasets = data
 
-        print(f"Loaded {len(self.client_datasets)} client dataset(s)")
-        for ds in self.client_datasets:
+        print(f"Loaded {len(self.datasets)} dataset(s)")
+        for ds in self.datasets:
             msg_size = ds.get("test_info", {}).get("msg_size", "unknown")
             samples = len(ds.get("bandwidth_samples", []))
             print(f"  - Packet size {msg_size}: {samples} samples")
 
-    # ---------------------------------------------------------
-    def load_server_data(self):
-        if not self.server_file:
-            print("No server file provided, skipping server data")
-            return
-
-        with open(self.server_file, "r") as f:
-            data = json.load(f)
-
-        # Handle both array and single object
-        if isinstance(data, dict):
-            self.server_datasets = [data]
-        else:
-            self.server_datasets = data
-
-        print(f"Loaded {len(self.server_datasets)} server dataset(s)")
-        for ds in self.server_datasets:
-            # Handle both formats: direct test_info or nested in server_statistics
-            if "test_info" in ds:
-                # Check for both 'msg_size' and 'packet_size'
-                test_info = ds["test_info"]
-                msg_size = test_info.get("msg_size") or test_info.get("packet_size", "unknown")
-                
-                # Check if it has server_throughput array (new tcpdump format)
-                if "server_throughput" in ds:
-                    samples = len(ds["server_throughput"])
-                # Or bandwidth_samples (client format)
-                elif "bandwidth_samples" in ds:
-                    samples = len(ds["bandwidth_samples"])
-                # Or server_statistics (old format)
-                elif "server_statistics" in ds:
-                    samples = 1
-                else:
-                    samples = 0
-            else:
-                msg_size = "unknown"
-                samples = 0
-            print(f"  - Packet size {msg_size}: {samples} iteration(s)")
-
-    # ---------------------------------------------------------
-    def extract_client_values(self, dataset):
-        bw = [s["bandwidth_mbps"] for s in dataset.get("bandwidth_samples", [])]
-        info = dataset.get("test_info", {})
-        return bw, info
-
-    # ---------------------------------------------------------
-    def extract_server_values(self, pkt_size):
-        """Extract server bandwidth values for a given packet size"""
-        if not self.server_datasets:
-            return []
-
-        server_bw = []
+    def extract_sender_values(self, dataset):
+        """Extract sender (client) bandwidth values"""
+        bw = []
         
-        for dataset in self.server_datasets:
-            # Check test_info for matching packet size
-            test_info = dataset.get("test_info", {})
-            
-            # Handle both 'msg_size' (client format) and 'packet_size' (server format)
-            msg_size = test_info.get("msg_size") or test_info.get("packet_size")
-            
-            if msg_size == pkt_size:
-                # Check if this has server_throughput array (tcpdump format)
-                if "server_throughput" in dataset:
-                    # Multiple iterations
-                    for entry in dataset["server_throughput"]:
-                        server_bw.append(entry.get("throughput_mbps", 0))
-                
-                # Or if this is the old format with server_statistics
-                elif "server_statistics" in dataset:
-                    # Single measurement from tcpdump
-                    stats = dataset["server_statistics"]
-                    server_bw.append(stats.get("throughput_mbps", 0))
-                
-                # Or if it's the same format as client (bandwidth_samples)
-                elif "bandwidth_samples" in dataset:
-                    # Multiple samples
-                    for sample in dataset["bandwidth_samples"]:
-                        server_bw.append(sample.get("bandwidth_mbps", 0))
+        if "bandwidth_samples" in dataset:
+            for sample in dataset["bandwidth_samples"]:
+                # Try sender_bandwidth_mbps first (iperf3 format)
+                if "sender_bandwidth_mbps" in sample:
+                    bw.append(sample["sender_bandwidth_mbps"])
+                # Fallback to bandwidth_mbps (old sockperf format)
+                elif "bandwidth_mbps" in sample:
+                    bw.append(sample["bandwidth_mbps"])
+        
+        return bw
+    
+    def extract_receiver_values(self, dataset):
+        """Extract receiver (server) bandwidth values"""
+        bw = []
+        
+        if "bandwidth_samples" in dataset:
+            for sample in dataset["bandwidth_samples"]:
+                # Look for receiver_bandwidth_mbps (iperf3 format)
+                if "receiver_bandwidth_mbps" in sample:
+                    bw.append(sample["receiver_bandwidth_mbps"])
+        
+        return bw
 
-        return server_bw
-
-    # ---------------------------------------------------------
     def create_buckets(self, values):
+        """Create bandwidth buckets and calculate percentages"""
         if not values:
             return {}
 
@@ -131,7 +84,7 @@ class BandwidthPlotter:
         buckets = {}
         start = min_bucket
         while start <= max_bucket:
-            buckets[f"{start}-{start+self.bucket_size}"] = {"count": 0}
+            buckets[f"{start}-{start+self.bucket_size}"] = {"count": 0, "start": start}
             start += self.bucket_size
 
         total = len(values)
@@ -146,92 +99,146 @@ class BandwidthPlotter:
 
         return buckets
 
-    # ---------------------------------------------------------
-    def plot_subplot(self, ax, client_bw, server_bw, pkt_size):
-        if not client_bw:
-            ax.text(0.5, 0.5, f'No client data for {pkt_size} bytes',
+    def plot_subplot(self, ax, sender_bw, receiver_bw, pkt_size):
+        """Plot a single bandwidth distribution comparison"""
+        if not sender_bw:
+            ax.text(0.5, 0.5, f'No data for {pkt_size} bytes',
                    ha='center', va='center', transform=ax.transAxes)
             return
 
-        # ------ Create client buckets ------
-        client_buckets = self.create_buckets(client_bw)
-        labels = list(client_buckets.keys())
-        client_percent = [client_buckets[k]["percentage"] for k in labels]
+        # Find the overall min/max to cover BOTH distributions
+        all_values = sender_bw.copy()
+        if receiver_bw:
+            all_values.extend(receiver_bw)
+        
+        overall_min = min(all_values)
+        overall_max = max(all_values)
+        
+        # Create unified bucket range
+        min_bucket = int(overall_min // self.bucket_size) * self.bucket_size
+        max_bucket = int(overall_max // self.bucket_size) * self.bucket_size + self.bucket_size
+        
+        # Create all bucket labels
+        all_labels = []
+        bucket = min_bucket
+        while bucket <= max_bucket:
+            all_labels.append(f"{bucket}-{bucket+self.bucket_size}")
+            bucket += self.bucket_size
+        
+        # Create sender buckets
+        sender_buckets = self.create_buckets(sender_bw)
+        sender_percent = [sender_buckets.get(label, {"percentage": 0})["percentage"] for label in all_labels]
 
-        x = np.arange(len(labels))
+        # Create receiver buckets
+        receiver_percent = []
+        if receiver_bw:
+            receiver_buckets = self.create_buckets(receiver_bw)
+            receiver_percent = [receiver_buckets.get(label, {"percentage": 0})["percentage"] for label in all_labels]
 
-        # ------ Plot client as blue bars ------
-        bars1 = ax.bar(
+        x = np.arange(len(all_labels))
+
+        # Plot sender as semi-transparent blue bars (OVERLAPPING, not side-by-side)
+        ax.bar(
             x,
-            client_percent,
-            width=0.4,
+            sender_percent,
+            width=0.8,  # Full width
             color="steelblue",
-            edgecolor="black",
-            label=f"Client (n={len(client_bw)})"
+            alpha=0.6,  # Semi-transparent
+            edgecolor="darkblue",
+            linewidth=1.5,
+            label="Client (Sender)"
         )
 
-        # ------ Server as transparent red bars (side-by-side) ------
-        if server_bw:
-            server_buckets = self.create_buckets(server_bw)
-            server_percent = [
-                server_buckets.get(k, {"percentage": 0})["percentage"]
-                for k in labels
-            ]
-
-            bars2 = ax.bar(
-                x + 0.42,                  # side-by-side offset
-                server_percent,
-                width=0.4,
+        # Plot receiver as semi-transparent red bars (OVERLAPPING at same position)
+        if receiver_bw:
+            ax.bar(
+                x,  # Same position as sender (not offset)
+                receiver_percent,
+                width=0.8,  # Full width
                 color="red",
-                alpha=0.35,               # transparent
+                alpha=0.5,  # Semi-transparent
                 edgecolor="darkred",
-                label=f"Server (n={len(server_bw)})"
+                linewidth=1.5,
+                label="Server (Receiver)"
             )
+            
+            # Where they overlap, you'll see purple/brown color
 
-        # ------ Formatting ------
-        n_client = len(client_bw)
-        avg_client = np.mean(client_bw)
-        title_parts = [f"Packet Size {pkt_size} bytes"]
-        title_parts.append(f"Client: {n_client} samples, avg={avg_client:.2f} Mbps")
-        
-        if server_bw:
-            n_server = len(server_bw)
-            avg_server = np.mean(server_bw)
-            title_parts.append(f"Server: {n_server} samples, avg={avg_server:.2f} Mbps")
-        
-        ax.set_title("\n".join(title_parts), fontsize=11, fontweight="bold")
-        ax.set_ylabel("Percentage of Samples (%)", fontsize=10, fontweight="bold")
-        ax.set_xlabel("Bandwidth Range (Mbps)", fontsize=10, fontweight="bold")
-        ax.set_xticks(x + 0.21 if server_bw else x)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+        # Title and labels — inherit sizes from rcParams, no hardcoded overrides
+        ax.set_title(f"Bandwidth Distribution - Packet Size {pkt_size} bytes",
+                    fontweight="bold")
+        ax.set_ylabel("Percentage of Samples (%)", fontweight="bold")
+        ax.set_xlabel("Bandwidth Range (Mbps)", fontweight="bold")
+
+        # Thin out x-ticks automatically when there are too many labels
+        max_ticks = 20
+        n_labels = len(all_labels)
+        if n_labels > max_ticks:
+            step = int(np.ceil(n_labels / max_ticks))
+            visible_indices = list(range(0, n_labels, step))
+            if (n_labels - 1) not in visible_indices:
+                visible_indices.append(n_labels - 1)
+            ax.set_xticks([x[i] for i in visible_indices])
+            ax.set_xticklabels([all_labels[i] for i in visible_indices], rotation=45, ha="right")
+        else:
+            ax.set_xticks(x)
+            ax.set_xticklabels(all_labels, rotation=45, ha="right")
+
         ax.grid(axis='y', linestyle='--', alpha=0.4)
-        ax.legend(loc='upper right')
 
-    # ---------------------------------------------------------
+        # Statistics box in top right — inherits rcParams font size
+        n_samples = len(sender_bw)
+        avg_sender = np.mean(sender_bw)
+
+        legend_lines = [
+            f"Packet Size: {pkt_size} bytes",
+            f"Samples: {n_samples}",
+            f"Client Avg: {avg_sender:.2f} Mbps"
+        ]
+
+        if receiver_bw:
+            avg_receiver = np.mean(receiver_bw)
+            legend_lines.append(f"Server Avg: {avg_receiver:.2f} Mbps")
+            loss_pct = ((avg_sender - avg_receiver) / avg_sender) * 100
+            legend_lines.append(f"Avg Loss: {loss_pct:.1f}%")
+
+        stats_text = "\n".join(legend_lines)
+        ax.text(0.98, 0.97, stats_text,
+               transform=ax.transAxes,
+               verticalalignment='top',
+               horizontalalignment='right',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+        # Color legend in top left
+        ax.legend(loc='upper left')
+
     def plot_all(self, output_file):
-        num_plots = len(self.client_datasets)
+        """Plot all datasets"""
+        num_plots = len(self.datasets)
         
         if num_plots == 0:
-            print("ERROR: No client datasets to plot")
+            print("ERROR: No datasets to plot")
             return
         
         fig, axes = plt.subplots(num_plots, 1, figsize=(15, num_plots * 5),
                                  squeeze=False)
         axes = axes.flatten()
 
-        for i, dataset in enumerate(self.client_datasets):
-            client_bw, test_info = self.extract_client_values(dataset)
-            pkt_size = test_info.get("msg_size")
-            server_bw = self.extract_server_values(pkt_size)
+        for i, dataset in enumerate(self.datasets):
+            test_info = dataset.get("test_info", {})
+            pkt_size = test_info.get("msg_size", "unknown")
+            
+            sender_bw = self.extract_sender_values(dataset)
+            receiver_bw = self.extract_receiver_values(dataset)
 
             print(f"\nPlotting packet size {pkt_size}:")
-            print(f"  Client samples: {len(client_bw)}")
-            print(f"  Server samples: {len(server_bw)}")
+            print(f"  Sender samples: {len(sender_bw)}")
+            print(f"  Receiver samples: {len(receiver_bw)}")
 
-            self.plot_subplot(axes[i], client_bw, server_bw, pkt_size)
+            self.plot_subplot(axes[i], sender_bw, receiver_bw, pkt_size)
 
         plt.suptitle("Client vs Server Bandwidth Distribution Comparison", 
-                    fontsize=16, fontweight="bold", y=0.995)
+                    fontsize=18, fontweight="bold", y=0.995)
         plt.tight_layout(rect=[0, 0, 1, 0.99])
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         print(f"\n{'='*60}")
@@ -239,48 +246,36 @@ class BandwidthPlotter:
         print(f"{'='*60}")
 
 
-# ======================================================================
-# MAIN
-# ======================================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="Client/Server bandwidth comparison plotter.",
+        description="Plot bandwidth distribution from iperf3 results (sender and receiver from same file)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Plot only client data
-  %(prog)s client_results.json -o comparison.png
-  
-  # Plot client vs server comparison
-  %(prog)s client_results.json --server server_results.json -o comparison.png
+  # Plot iperf3 results (contains both sender and receiver data)
+  %(prog)s results.json -o comparison.png
   
   # Use 20 Mbps buckets
-  %(prog)s client_results.json --server server_results.json -b 20 -o comparison.png
+  %(prog)s results.json -b 20 -o comparison.png
 
 Supported JSON formats:
-  - Client/Server with bandwidth_samples array
-  - Server with server_statistics object (from tcpdump monitor)
+  - iperf3 format with sender_bandwidth_mbps and receiver_bandwidth_mbps
+  - Old sockperf format with bandwidth_mbps (shows as client only)
         """
     )
-    parser.add_argument("client", help="Client JSON file")
-    parser.add_argument("--server", help="Server JSON file (optional)")
+    parser.add_argument("input", help="Input JSON file with bandwidth data")
     parser.add_argument("-b", "--bucket", type=int, default=10, 
                        help="Bucket size in Mbps (default: 10)")
     parser.add_argument("-o", "--output", default="bandwidth_comparison.png",
                         help="Output image filename (default: bandwidth_comparison.png)")
     args = parser.parse_args()
 
-    if not os.path.exists(args.client):
-        print(f"ERROR: Client file not found: {args.client}")
+    if not os.path.exists(args.input):
+        print(f"ERROR: Input file not found: {args.input}")
         return
 
-    if args.server and not os.path.exists(args.server):
-        print(f"ERROR: Server file not found: {args.server}")
-        return
-
-    plotter = BandwidthPlotter(args.client, args.server, args.bucket)
-    plotter.load_client_data()
-    plotter.load_server_data()
+    plotter = BandwidthPlotter(args.input, args.bucket)
+    plotter.load_data()
     plotter.plot_all(args.output)
 
 
