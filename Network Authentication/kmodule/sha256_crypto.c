@@ -1,7 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * SHA256 crypto Kernel Module
- * Exposes SHA256 hash functions as eBPF kfuncs
- * Uses Kernel Crypto API
+ * sha256_crypto.c
+ *
+ * Exposes SHA-256 keyed hash as a BPF kfunc via the Kernel Crypto API.
+ *
+ * The Crypto API selects the highest-priority registered backend at
+ * crypto_alloc_shash() time.  On x86-64 this will be sha256-avx2 or
+ * sha256-ssse3 (SIMD-accelerated), on aarch64 sha256-ce (ARMv8 CE), etc.
+ * No explicit SIMD management is required here.
+ *
+ * Per-CPU shash_desc descriptors are pre-allocated in module init so the
+ * hot path (bpf_sha256_keyed_hash) performs zero dynamic allocation.
+ *
+ * kfunc signature visible to BPF programs:
+ *
+ *   int bpf_sha256_keyed_hash(const __u8 *key,  __u32 key_len,
+ *                             const __u8 *data, __u32 data_len,
+ *                             __u8 *hash);
+ *
+ *   Concatenates key||data, computes SHA-256, writes 32 bytes to hash[].
+ *   key_len  <= 64, data_len <= 20 (fixed eBPF stack-safe limits).
+ *   Returns 0 on success, -EINVAL on bad args, negative errno from crypto.
  */
 
 #include <linux/module.h>
@@ -10,54 +29,62 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/version.h>
+#include <linux/bpf.h>
+#include <linux/btf.h>
+#include <linux/btf_ids.h>
 #include <crypto/hash.h>
 
-/* Only include BTF headers if kernel supports them properly */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
-    #ifdef CONFIG_DEBUG_INFO_BTF
-        #include <linux/btf.h>
-        #include <linux/bpf.h>
-        #if IS_ENABLED(CONFIG_DEBUG_INFO_BTF)
-            #include <linux/btf_ids.h>
-            #define KFUNC_SUPPORTED 1
-        #endif
-    #endif
+/* ------------------------------------------------------------------
+ * Compat: __bpf_kfunc_start/end_defs added in 6.4
+ * ------------------------------------------------------------------ */
+#ifndef __bpf_kfunc_start_defs
+# ifdef __diag_push
+#  define __bpf_kfunc_start_defs() \
+     __diag_push(); \
+     __diag_ignore_all("-Wmissing-prototypes", "kfunc definitions")
+#  define __bpf_kfunc_end_defs()   __diag_pop()
+# else
+#  define __bpf_kfunc_start_defs()
+#  define __bpf_kfunc_end_defs()
+# endif
 #endif
 
-#ifndef KFUNC_SUPPORTED
-#warning "kfunc support not available, compiling as regular module"
-#define KFUNC_SUPPORTED 0
-#endif
+/* SHA-256 produces 32-byte digests */
+#define SHA256_DIGEST_SIZE  32u
+/* Maximum combined input we'll stack-allocate (64 key + 20 data) */
+#define SHA256_MAX_KEY      64u
+#define SHA256_MAX_DATA     20u
+#define SHA256_MAX_COMBINED (SHA256_MAX_KEY + SHA256_MAX_DATA)  /* 84 */
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Research Module");
-MODULE_DESCRIPTION("Crypto SHA256 kfunc for eBPF programs");
-MODULE_VERSION("1.0");
-
-/*************************** STATE ***************************/
+/*************************** MODULE STATE ***************************/
 static struct crypto_shash *sha256_tfm;
 static DEFINE_PER_CPU(struct shash_desc *, sha256_desc);
 
-/*************************** KFUNC PROTOTYPES ***************************/
-#if KFUNC_SUPPORTED
-__bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
-                                      const __u8 *data, __u32 data_len,
-                                      __u8 *hash);
-#endif
+/*************************** KFUNC ***************************/
+__bpf_kfunc_start_defs();
 
-/************************ KFUNC IMPLEMENTATION ************************/
-#if KFUNC_SUPPORTED
-__bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
-                                      const __u8 *data, __u32 data_len,
-                                      __u8 *hash)
+/**
+ * bpf_sha256_keyed_hash - compute SHA-256(key || data)
+ * @key:      pointer to key bytes (BPF-trusted)
+ * @key_len:  length of key, must be <= 64
+ * @data:     pointer to data bytes (BPF-trusted)
+ * @data_len: length of data, must be <= 20
+ * @hash:     output buffer, must be exactly 32 bytes (BPF-trusted)
+ *
+ * This is a keyed hash by concatenation, NOT HMAC.  Use the HMAC module
+ * (hmac_kfunc.ko) for a proper PRF.
+ */
+__bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key,  __u32 key_len,
+                                       const __u8 *data, __u32 data_len,
+                                       __u8 *hash)
 {
     struct shash_desc *desc;
+    u8 combined[SHA256_MAX_COMBINED];
     int ret;
-    u8 combined[84];  // 64 key + 20 data - fixed size, stack allocated
 
     if (!key || !data || !hash)
         return -EINVAL;
-    if (key_len > 64 || data_len > 20)
+    if (key_len > SHA256_MAX_KEY || data_len > SHA256_MAX_DATA)
         return -EINVAL;
 
     memcpy(combined, key, key_len);
@@ -66,41 +93,39 @@ __bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
     desc = get_cpu_var(sha256_desc);
     ret = crypto_shash_digest(desc, combined, key_len + data_len, hash);
     put_cpu_var(sha256_desc);
+
     return ret;
 }
 
-/* BTF registration */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-BTF_KFUNCS_START(sha256_kfunc_ids)
-#else
-BTF_SET8_START(sha256_kfunc_ids)
-#endif
+__bpf_kfunc_end_defs();
 
+EXPORT_SYMBOL_GPL(bpf_sha256_keyed_hash);
+
+/*************************** BTF REGISTRATION ***************************/
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+BTF_KFUNCS_START(sha256_crypto_ids)
 BTF_ID_FLAGS(func, bpf_sha256_keyed_hash, KF_TRUSTED_ARGS)
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-BTF_KFUNCS_END(sha256_kfunc_ids)
+BTF_KFUNCS_END(sha256_crypto_ids)
 #else
-BTF_SET8_END(sha256_kfunc_ids)
+BTF_SET8_START(sha256_crypto_ids)
+BTF_ID_FLAGS(func, bpf_sha256_keyed_hash, KF_TRUSTED_ARGS)
+BTF_SET8_END(sha256_crypto_ids)
 #endif
 
-static const struct btf_kfunc_id_set sha256_kfunc_set = {
+static const struct btf_kfunc_id_set sha256_crypto_set = {
     .owner = THIS_MODULE,
-    .set   = &sha256_kfunc_ids,
+    .set   = &sha256_crypto_ids,
 };
-#endif /* KFUNC_SUPPORTED */
 
-/************************ MODULE INIT/EXIT ************************/
-static int __init sha256_kfunc_init(void)
+/*************************** MODULE INIT / EXIT ***************************/
+static int __init sha256_crypto_init(void)
 {
     int cpu, ret;
 
-    printk(KERN_INFO "SHA256 module loading (kfunc support: %s)\n",
-           KFUNC_SUPPORTED ? "yes" : "no");
-
     sha256_tfm = crypto_alloc_shash("sha256", 0, 0);
     if (IS_ERR(sha256_tfm)) {
-        pr_err("Failed to allocate sha256 shash: %ld\n", PTR_ERR(sha256_tfm));
+        pr_err("sha256_crypto: failed to allocate shash transform: %ld\n",
+               PTR_ERR(sha256_tfm));
         return PTR_ERR(sha256_tfm);
     }
 
@@ -109,7 +134,8 @@ static int __init sha256_kfunc_init(void)
             sizeof(*desc) + crypto_shash_descsize(sha256_tfm),
             GFP_KERNEL, cpu_to_node(cpu));
         if (!desc) {
-            pr_err("Failed to allocate shash_desc for CPU %d\n", cpu);
+            pr_err("sha256_crypto: failed to allocate shash_desc for CPU %d\n", cpu);
+            /* Clean up all CPUs allocated so far */
             for_each_possible_cpu(cpu) {
                 kfree(per_cpu(sha256_desc, cpu));
                 per_cpu(sha256_desc, cpu) = NULL;
@@ -121,42 +147,49 @@ static int __init sha256_kfunc_init(void)
         per_cpu(sha256_desc, cpu) = desc;
     }
 
-#if KFUNC_SUPPORTED
-    ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_XDP, &sha256_kfunc_set);
+    ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_XDP, &sha256_crypto_set);
     if (ret) {
-        pr_err("Failed to register SHA256 kfuncs for XDP: %d\n", ret);
-        return ret;
+        pr_err("sha256_crypto: XDP registration failed (%d)\n", ret);
+        goto err_free;
     }
-    printk(KERN_INFO "XDP kfunc registration result: %d\n", ret);
 
-    ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_SYSCALL, &sha256_kfunc_set);
+    ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_SCHED_CLS, &sha256_crypto_set);
     if (ret)
-        pr_err("Failed to register SHA256 kfuncs for SYSCALL: %d\n", ret);
-    printk(KERN_INFO "SYSCALL kfunc registration result: %d\n", ret);
+        pr_warn("sha256_crypto: SCHED_CLS registration failed (%d), continuing\n", ret);
 
-    ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_SCHED_CLS, &sha256_kfunc_set);
+    ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_SYSCALL, &sha256_crypto_set);
     if (ret)
-        pr_err("Failed to register SHA256 kfuncs for TC: %d\n", ret);
-    printk(KERN_INFO "TC kfunc registration result: %d\n", ret);
+        pr_warn("sha256_crypto: SYSCALL registration failed (%d), continuing\n", ret);
 
-    printk(KERN_INFO "SHA256 kfuncs registered successfully\n");
-#else
-    printk(KERN_INFO "SHA256 module loaded (kfunc registration skipped - no BTF support)\n");
-#endif
-
+    pr_info("sha256_crypto: loaded — bpf_sha256_keyed_hash() ready (driver: %s)\n",
+            crypto_shash_driver_name(sha256_tfm));
     return 0;
-}
 
-static void __exit sha256_kfunc_exit(void)
-{
-    int cpu;
+err_free:
     for_each_possible_cpu(cpu) {
         kfree(per_cpu(sha256_desc, cpu));
         per_cpu(sha256_desc, cpu) = NULL;
     }
     crypto_free_shash(sha256_tfm);
-    pr_info("SHA256 kfunc module unloading\n");
+    return ret;
 }
 
-module_init(sha256_kfunc_init);
-module_exit(sha256_kfunc_exit);
+static void __exit sha256_crypto_exit(void)
+{
+    int cpu;
+
+    for_each_possible_cpu(cpu) {
+        kfree(per_cpu(sha256_desc, cpu));
+        per_cpu(sha256_desc, cpu) = NULL;
+    }
+    crypto_free_shash(sha256_tfm);
+    pr_info("sha256_crypto: unloaded\n");
+}
+
+module_init(sha256_crypto_init);
+module_exit(sha256_crypto_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Research Module");
+MODULE_DESCRIPTION("SHA-256 keyed hash kfunc for eBPF (Crypto API, SIMD-accelerated)");
+MODULE_VERSION("1.0");
