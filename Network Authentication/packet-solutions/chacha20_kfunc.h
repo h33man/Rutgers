@@ -3,7 +3,7 @@
  * chacha20_kfunc.h
  *
  * Include this header in eBPF programs that want to call
- * bpf_chacha20poly1305_auth().
+ * bpf_chacha20poly1305_hash().
  *
  * The kfunc is implemented in chacha20poly1305_kfunc.c and registered for
  * BPF_PROG_TYPE_XDP and BPF_PROG_TYPE_SCHED_CLS.
@@ -53,14 +53,14 @@
  * Example (TC / XDP, use_kfunc == 2):
  *
  *   __u8 hash_result[SHA256_BLOCK_SIZE] = {};   // 32-byte buffer
- *   int ret = bpf_chacha20poly1305_auth(auth_data->key, 16,
+ *   int ret = bpf_chacha20poly1305_hash(auth_data->key, 16,
  *                                       hdr_copy, header_size,
  *                                       hash_result, sizeof(hash_result));
  *   if (ret != 0) { ... error ... }
  *   // hash_result[0..15] holds the Poly1305 tag
  *   // hash_result[16..31] are zero (zero-padded by kfunc)
  */
-extern int bpf_chacha20poly1305_auth(const __u8 *key,  __u32 key__sz,
+extern int bpf_chacha20poly1305_hash(const __u8 *key,  __u32 key__sz,
                                      const __u8 *data, __u32 data__sz,
                                      __u8 *out) __ksym;
 

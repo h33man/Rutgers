@@ -83,7 +83,7 @@ __bpf_kfunc void bpf_sha256_ctx_release(struct bpf_sha256_ctx *ctx);
 __bpf_kfunc int bpf_bpf_sha256_update(struct bpf_sha256_ctx *ctx, const __u8 *data, __u32 len);
 __bpf_kfunc int bpf_bpf_sha256_final(struct bpf_sha256_ctx *ctx, __u8 *hash);
 __bpf_kfunc int bpf_sha256_oneshot(const __u8 *data, __u32 len, __u8 *hash);
-__bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
+__bpf_kfunc int bpf_sha256_hash(const __u8 *key, __u32 key_len,
                                       const __u8 *data, __u32 data_len, 
                                       __u8 *hash);
 #endif
@@ -204,7 +204,7 @@ __bpf_kfunc int bpf_sha256_oneshot(const __u8 *data, __u32 len, __u8 *hash)
     return bpf_sha256_final(&ctx, hash);
 }
 
-__bpf_kfunc int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
+__bpf_kfunc int bpf_sha256_hash(const __u8 *key, __u32 key_len,
                                       const __u8 *data, __u32 data_len, __u8 *hash)
 {
     struct bpf_sha256_ctx ctx;
@@ -238,7 +238,7 @@ BTF_ID_FLAGS(func, bpf_sha256_ctx_release, KF_RELEASE)
 BTF_ID_FLAGS(func, bpf_bpf_sha256_update, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_bpf_sha256_final, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_sha256_oneshot, KF_TRUSTED_ARGS)
-BTF_ID_FLAGS(func, bpf_sha256_keyed_hash, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_sha256_hash, KF_TRUSTED_ARGS)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 BTF_KFUNCS_END(sha256_kfunc_ids)
 #else

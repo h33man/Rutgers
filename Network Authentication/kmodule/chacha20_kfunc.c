@@ -341,7 +341,7 @@ static void chacha20poly1305_auth_internal(const u8 key32[CHACHA_KEY_SIZE],
 __bpf_kfunc_start_defs();
 
 /*
- * bpf_chacha20poly1305_auth() - Poly1305 MAC with ChaCha20-derived one-time key
+ * bpf_chacha20poly1305_hash() - Poly1305 MAC with ChaCha20-derived one-time key
  *
  * @key:      secret key, 1-32 bytes; short keys repeated to fill 32 bytes
  * @key__sz:  byte length of @key
@@ -360,7 +360,7 @@ __bpf_kfunc_start_defs();
  *  - chacha20_block_self uses put_unaligned_le32 (1 store vs 4 shifts)
  *  - poly1305_update partial block: no = {} init, no memzero_explicit
  */
-__bpf_kfunc int bpf_chacha20poly1305_auth(const u8 *key,  u32 key__sz,
+__bpf_kfunc int bpf_chacha20poly1305_hash(const u8 *key,  u32 key__sz,
                                            const u8 *data, u32 data__sz,
                                            u8       *out)
 {
@@ -403,11 +403,11 @@ __bpf_kfunc_end_defs();
  * ================================================================== */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 BTF_KFUNCS_START(chacha20poly1305_kfunc_ids)
-BTF_ID_FLAGS(func, bpf_chacha20poly1305_auth, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_chacha20poly1305_hash, KF_TRUSTED_ARGS)
 BTF_KFUNCS_END(chacha20poly1305_kfunc_ids)
 #else
 BTF_SET8_START(chacha20poly1305_kfunc_ids)
-BTF_ID_FLAGS(func, bpf_chacha20poly1305_auth, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_chacha20poly1305_hash, KF_TRUSTED_ARGS)
 BTF_SET8_END(chacha20poly1305_kfunc_ids)
 #endif
 
@@ -434,7 +434,7 @@ static int __init chacha20poly1305_kfunc_init(void)
         return ret;
     }
 
-    pr_info("chacha20poly1305_kfunc: loaded (optimized) - bpf_chacha20poly1305_auth() ready\n");
+    pr_info("chacha20poly1305_kfunc: loaded (optimized) - bpf_chacha20poly1305_hash() ready\n");
     return 0;
 }
 

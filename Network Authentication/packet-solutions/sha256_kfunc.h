@@ -18,7 +18,7 @@ extern void bpf_sha256_ctx_release(struct bpf_sha256_ctx *ctx) __ksym;
 extern int bpf_sha256_update(struct bpf_sha256_ctx *ctx, const __u8 *data, __u32 len) __ksym;
 extern int bpf_sha256_final(struct bpf_sha256_ctx *ctx, __u8 *hash) __ksym;
 extern int bpf_sha256_oneshot(const __u8 *data, __u32 len, __u8 *hash) __ksym;
-extern int bpf_sha256_keyed_hash(const __u8 *key, __u32 key_len,
+extern int bpf_sha256_hash(const __u8 *key, __u32 key_len,
                                 const __u8 *data, __u32 data_len, 
                                 __u8 *hash) __ksym;
 

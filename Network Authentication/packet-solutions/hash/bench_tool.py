@@ -34,11 +34,13 @@ VARIANTS = [
     "hmac_sha256",
     "hmac_sha512",
     "blake3",
+    "chacha20",
+    "kfunc_sha256",
     "pure_ebpf",
     "packet_resize",
 ]
 
-KFUNC_VARIANTS = {"sha256", "sha512", "hmac_sha256", "hmac_sha512", "blake3"}
+KFUNC_VARIANTS = {"sha256", "sha512", "hmac_sha256", "hmac_sha512", "blake3", "chacha20", "kfunc_sha256"}
 
 KFUNC_MODULES = {
     "sha256":      "sha256_crypto",
@@ -46,6 +48,8 @@ KFUNC_MODULES = {
     "hmac_sha256": "hmac_crypto",
     "hmac_sha512": "hmac_crypto",
     "blake3":      "blake3_kfunc",
+    "chacha20":    "chacha20_kfunc",
+    "kfunc_sha256": "sha256_kfunc",
 }
 
 BPF_PIN_ROOT  = "/sys/fs/bpf"
@@ -664,7 +668,7 @@ def phase_throughput(args, variant):
     log(f"    {mpps:.3f} Mpps  {gbps:.2f} Gbps   drop={drop_rate:.2%}")
     return result
 
-PKTGEN_RAMP_S = 8   # seconds to wait after gen_start before traffic is stable
+PKTGEN_RAMP_S = 11   # seconds to wait after gen_start before traffic is stable
 
 def phase_all(args):
     results = {

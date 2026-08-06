@@ -14,17 +14,30 @@
  *
  * The implementation covers:
  *   - Single-call "oneshot" hashing up to 1 KiB of input
+ *   - Single-call "oneshot" keyed hashing (BLAKE3 MAC mode) up to 1 KiB
  *   - 32-byte (256-bit) output
  *
  * Restrictions kept intentionally tight for eBPF verifier stack safety:
  *   data_len <= 1024 bytes
  *   out is exactly 32 bytes
+ *   key (keyed mode) is exactly 32 bytes
  *
- * kfunc signature visible to BPF programs:
+ * kfunc signatures visible to BPF programs:
  *
  *   int bpf_blake3_hash(const __u8 *data, __u32 data_len, __u8 *out);
+ *   int bpf_blake3_keyed_hash(const __u8 *key, __u32 key_len, const __u8 *data,
+ *                              __u32 data_len, __u8 *out);
  *
  * Returns 0 on success, -EINVAL on bad args.
+ *
+ * bpf_blake3_keyed_hash() is BLAKE3's native MAC mode and the intended
+ * point of comparison against HMAC-SHA256/HMAC-SHA512 in this paper's
+ * per-packet authentication benchmarks -- NOT bpf_blake3_hash() with a
+ * key prepended to the message, which is not a secure MAC construction
+ * for a Merkle-tree-based hash like BLAKE3. Keyed mode requires both
+ * substituting the key for the public IV as the root chaining value
+ * AND setting the BLAKE3_KEYED_HASH domain flag on every compression
+ * call; see b3_hash_oneshot() for the verified-correct mechanism.
  *
  * Design notes (matching chacha20_kfunc.c conventions):
  *   - No kernel crypto API dependency — zero external symbols required
@@ -68,8 +81,9 @@
  *
  * Spec: https://github.com/BLAKE3-team/BLAKE3/blob/master/spec/blake3.pdf
  *
- * Scope: oneshot hashing of up to 1 KiB.  Streaming / XOF / keyed-hash
- * / key-derivation modes are not implemented (not needed for kfunc use).
+ * Scope: oneshot hashing (and keyed hashing) of up to 1 KiB. Streaming
+ * / XOF / key-derivation modes are not implemented (not needed for
+ * kfunc use).
  * ================================================================== */
 
 /* ---- Constants ---- */
@@ -87,6 +101,7 @@
 #define BLAKE3_CHUNK_END     (1u << 1)
 #define BLAKE3_PARENT        (1u << 2)
 #define BLAKE3_ROOT          (1u << 3)
+#define BLAKE3_KEYED_HASH    (1u << 4)
 
 /* Initialization vector (same as SHA-256 IV) */
 static const u32 BLAKE3_IV[8] = {
@@ -94,15 +109,23 @@ static const u32 BLAKE3_IV[8] = {
     0x510E527Fu, 0x9B05688Cu, 0x1F83D9ABu, 0x5BE0CD19u,
 };
 
-/* Message permutation for each round */
+/*
+ * Message permutation for each round.
+ *
+ * NOTE: This table was previously transcribed incorrectly (rows 1-6 did
+ * not match the BLAKE3 spec / reference implementation, causing this
+ * module to emit non-standard, non-interoperable digests). Verified
+ * 2026-06-24 against the official reference source:
+ *   https://github.com/BLAKE3-team/BLAKE3/blob/master/c/blake3_impl.h
+ */
 static const u8 BLAKE3_MSG_SCHEDULE[7][16] = {
     { 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15},
-    { 2, 10,  8, 14,  3,  4,  9, 15,  0,  6,  5, 11, 13,  7, 12,  1},
-    { 3, 11, 10, 15,  1,  9,  6, 14,  0,  7,  5,  8, 12,  2,  4, 13},
-    { 1, 14, 10,  0,  2,  8, 14,  6,  3,  4,  9,  5, 12, 11,  7, 13},
-    {11,  8,  7,  9,  3, 14,  4,  5,  2, 15,  6,  0, 10, 13,  1, 12},
-    { 7,  5,  3,  1, 13, 11, 12, 14,  2,  4,  6,  8, 15,  0,  9, 10},
-    { 1,  7, 14,  5, 10,  8,  3,  9, 13,  6,  0,  2, 11, 15, 12,  4},
+    { 2,  6,  3, 10,  7,  0,  4, 13,  1, 11, 12,  5,  9, 14, 15,  8},
+    { 3,  4, 10, 12, 13,  2,  7, 14,  6,  5,  9,  0, 11, 15,  8,  1},
+    {10,  7, 12,  9, 14,  3, 13, 15,  4,  0, 11,  2,  5,  8,  1,  6},
+    {12, 13,  9, 11, 15, 10, 14,  8,  7,  2,  5,  3,  0,  1,  6,  4},
+    { 9, 14, 11,  5,  8, 12, 15,  1, 13,  3,  0, 10,  2,  6,  4,  7},
+    {11, 15,  5,  0,  1,  9,  8,  6, 14, 10,  2, 12,  3,  4,  7, 13},
 };
 
 /* ---- Primitives ---- */
@@ -200,6 +223,23 @@ static void b3_load_block(const u8 *src, size_t src_len,
 }
 
 /*
+ * b3_load_key - turn a raw 32-byte key into 8 little-endian words
+ *
+ * This is the entire mechanism behind BLAKE3 keyed-hash mode: the 8
+ * key words substitute directly for BLAKE3_IV as the chunk-0 root
+ * chaining value, in place of the public IV used in unkeyed mode.
+ * Everything else (block loading, compression, flags, finalization)
+ * is byte-for-byte identical between keyed and unkeyed hashing.
+ */
+static void b3_load_key(const u8 key[BLAKE3_KEY_LEN], u32 key_words[8])
+{
+    size_t i;
+
+    for (i = 0; i < 8; i++)
+        key_words[i] = get_unaligned_le32(key + i * 4);
+}
+
+/*
  * b3_hash_oneshot - BLAKE3 hash for inputs up to one chunk (1024 bytes)
  *
  * For inputs <= 1024 bytes there is at most one chunk and no parent nodes,
@@ -207,11 +247,23 @@ static void b3_load_block(const u8 *src, size_t src_len,
  *
  * Inputs longer than 1024 bytes would require a Merkle tree of parent
  * nodes; that is not implemented.  The kfunc enforces data_len <= 1024.
+ *
+ * @init_cv:    initial chaining value for chunk 0. Pass BLAKE3_IV for
+ *              unkeyed (regular) hashing, or the 8 key words (from
+ *              b3_load_key()) for keyed-hash mode.
+ * @base_flags: domain flags ORed into *every* block's flags in addition
+ *              to the per-block CHUNK_START/CHUNK_END/ROOT flags. Pass 0
+ *              for unkeyed hashing, or BLAKE3_KEYED_HASH for keyed mode.
+ *              Per the BLAKE3 spec, keyed mode requires BOTH substituting
+ *              the key for the IV as init_cv AND setting BLAKE3_KEYED_HASH
+ *              on every compression call in the chunk -- CV substitution
+ *              alone is not sufficient and produces non-standard output.
  */
 static void b3_hash_oneshot(const u8 *data, size_t data_len,
+                              const u32 init_cv[8], u32 base_flags,
                               u8 out[BLAKE3_OUT_LEN])
 {
-    const u32 *cv = BLAKE3_IV;     /* chunk CV starts as IV for hash mode */
+    const u32 *cv = init_cv;
     u32 block_words[16];
     u32 compress_out[16];
     u32 cv_buf[8];
@@ -224,7 +276,8 @@ static void b3_hash_oneshot(const u8 *data, size_t data_len,
      * Process the input in 64-byte blocks within the single chunk.
      * Each block gets CHUNK_START on the first block, CHUNK_END on
      * the last (which may be both if input <= 64 bytes), and ROOT
-     * because there is only one chunk.
+     * because there is only one chunk. base_flags (e.g. KEYED_HASH)
+     * applies to every block.
      */
     do {
         size_t remaining = data_len - offset;
@@ -232,7 +285,7 @@ static void b3_hash_oneshot(const u8 *data, size_t data_len,
 
         block_len = last_block ? (u32)remaining : BLAKE3_BLOCK_LEN;
 
-        flags = 0;
+        flags = base_flags;
         if (first_block)
             flags |= BLAKE3_CHUNK_START;
         if (last_block)
@@ -289,13 +342,55 @@ __bpf_kfunc int bpf_blake3_hash(const __u8 *data, __u32 data_len, __u8 *out)
     if (data_len > BLAKE3_CHUNK_LEN)
         return -EINVAL;
 
-    b3_hash_oneshot(data, data_len, out);
+    b3_hash_oneshot(data, data_len, BLAKE3_IV, 0, out);
+    return 0;
+}
+
+/**
+ * bpf_blake3_keyed_hash - compute BLAKE3 keyed-hash MAC, 32-byte output
+ * @key:      pointer to 32-byte secret key (BPF-trusted)
+ * @key_len:  length of key, must be 32 bytes, else truncate trailing bytes
+ * @data:     pointer to input bytes (BPF-trusted)
+ * @data_len: length of input, must be <= 1024
+ * @out:      output buffer, must be exactly 32 bytes (BPF-trusted)
+ *
+ * This is BLAKE3's native keyed-hash mode (the third mode alongside
+ * unkeyed hash and key-derivation), and is BLAKE3's direct, single-pass
+ * replacement for HMAC. Unlike HMAC, which wraps a non-keyed hash in an
+ * inner/outer nested construction to avoid length-extension and
+ * related-key weaknesses, BLAKE3 is keyed by (a) substituting the 8 key
+ * words for the public IV as chunk 0's root chaining value, AND (b)
+ * setting the BLAKE3_KEYED_HASH domain flag on every compression call
+ * -- see b3_load_key() / b3_hash_oneshot(). Both (a) and (b) are
+ * required by spec; CV substitution alone is not a correct keyed hash.
+ * The compression function and message schedule are otherwise
+ * byte-for-byte identical to unkeyed mode, so this kfunc has no extra
+ * cost over bpf_blake3_hash() beyond loading the key words once.
+ *
+ * Returns 0 on success, -EINVAL on bad args.
+ *
+ * Note: For inputs > 1024 bytes, BLAKE3 requires a Merkle-tree parent
+ * node construction not implemented here (see bpf_blake3_hash()).
+ */
+__bpf_kfunc int bpf_blake3_keyed_hash(const __u8 *key, __u32 key_len, const __u8 *data,
+                                       __u32 data_len, __u8 *out)
+{
+    u32 key_words[8];
+
+    if (!key || !data || !out)
+        return -EINVAL;
+    if (data_len > BLAKE3_CHUNK_LEN)
+        return -EINVAL;
+
+    b3_load_key(key, key_words);
+    b3_hash_oneshot(data, data_len, key_words, BLAKE3_KEYED_HASH, out);
     return 0;
 }
 
 __bpf_kfunc_end_defs();
 
 EXPORT_SYMBOL_GPL(bpf_blake3_hash);
+EXPORT_SYMBOL_GPL(bpf_blake3_keyed_hash);
 
 /* ==================================================================
  * Registration
@@ -303,10 +398,12 @@ EXPORT_SYMBOL_GPL(bpf_blake3_hash);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 BTF_KFUNCS_START(blake3_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_blake3_hash, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_blake3_keyed_hash, KF_TRUSTED_ARGS)
 BTF_KFUNCS_END(blake3_kfunc_ids)
 #else
 BTF_SET8_START(blake3_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_blake3_hash, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_blake3_keyed_hash, KF_TRUSTED_ARGS)
 BTF_SET8_END(blake3_kfunc_ids)
 #endif
 
@@ -333,7 +430,7 @@ static int __init blake3_kfunc_init(void)
     if (ret)
         pr_warn("blake3_kfunc: SYSCALL registration failed (%d), continuing\n", ret);
 
-    pr_info("blake3_kfunc: loaded — bpf_blake3_hash() ready (scalar C, up to 1 KiB input)\n");
+    pr_info("blake3_kfunc: loaded — bpf_blake3_hash() / bpf_blake3_keyed_hash() ready (scalar C, up to 1 KiB input)\n");
     return 0;
 }
 

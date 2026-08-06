@@ -7,7 +7,8 @@
 
 /*************************** HEADER FILES ***************************/
 #include "sha256.h"
-#include "sha256_kfunc.h"
+//#include "sha256_kfunc.h"
+//#include "sha256_crypto.h"
 #include "chacha20_kfunc.h"
 
 //extern __u8 debug;
@@ -253,10 +254,19 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
             bpf_printk("Using kfunc SHA256 for hash\n");
             #endif
             
-            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
+            ret = bpf_sha256_hash(auth_data->key, 64,
                            (BYTE *)iphdr, header_size, hash_result);
         }
         else if (config_ctx->use_kfunc == 2) {
+            // Use crypto SHA256 kfunc
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using crypto SHA256 for hash\n");
+            #endif
+            
+            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
+                           (BYTE *)iphdr, header_size, hash_result);
+        }
+        else if (config_ctx->use_kfunc == 3) {
             // Use custom CHACHA20-POLY1305 implementation
             #ifdef BPF_DEBUG 
             bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
@@ -274,7 +284,7 @@ int tc_ip_hash_func(struct __sk_buff *ctx)
                 goto out;
             }
 
-            ret = bpf_chacha20poly1305_auth(auth_data->key, 32, 
+            ret = bpf_chacha20poly1305_hash(auth_data->key, 32, 
                                             hdr_copy, header_size, hash_result);
 
         } else {

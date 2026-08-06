@@ -205,13 +205,27 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
 
         __u8 hdr_stack[sizeof(struct iphdr)];
         __builtin_memcpy(hdr_stack, &verify_ctx->original_header, sizeof(struct iphdr));
-        ret = bpf_sha256_keyed_hash(dynamic_key, 64,
+        ret = bpf_sha256_hash(dynamic_key, 64,
                                    hdr_stack,
                                    sizeof(struct iphdr),
                                    verify_ctx->computed_hash);
 
     }
     else if (config_ctx->use_kfunc == 2) {
+        // Use crypto SHA256 kfunc
+        #ifdef BPF_DEBUG 
+        bpf_printk("Using crypto SHA256 for verification\n");
+        #endif
+
+        __u8 hdr_stack[sizeof(struct iphdr)];
+        __builtin_memcpy(hdr_stack, &verify_ctx->original_header, sizeof(struct iphdr));
+        ret = bpf_sha256_keyed_hash(dynamic_key, 64,
+                                   hdr_stack,
+                                   sizeof(struct iphdr),
+                                   verify_ctx->computed_hash);
+
+    }
+    else if (config_ctx->use_kfunc == 3) {
         // Use custom CHACHA20-POLY1305 implementation
         #ifdef BPF_DEBUG 
         bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
@@ -226,7 +240,7 @@ static __always_inline int verify_ip_hash_with_key(struct xdp_md *ctx,
         __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
                                    sizeof(struct iphdr)); 
 
-        ret = bpf_chacha20poly1305_auth(dynamic_key, 32, hdr_copy, sizeof(struct iphdr),
+        ret = bpf_chacha20poly1305_hash(dynamic_key, 32, hdr_copy, sizeof(struct iphdr),
                                         verify_ctx->computed_hash);
 
     }
@@ -716,13 +730,27 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
 
             __u8 hdr_stack[sizeof(struct iphdr)];
             __builtin_memcpy(hdr_stack, &verify_ctx->original_header, sizeof(struct iphdr));
-            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
+            ret = bpf_sha256_hash(auth_data->key, 64,
                                        hdr_stack, 
                                        sizeof(struct iphdr),
                                        verify_ctx->computed_hash);
 
         }
         else if (config_ctx->use_kfunc == 2) {
+            // Use crypto SHA256 kfunc
+            #ifdef BPF_DEBUG 
+            bpf_printk("Using crypto SHA256 for verification\n");
+            #endif
+
+            __u8 hdr_stack[sizeof(struct iphdr)];
+            __builtin_memcpy(hdr_stack, &verify_ctx->original_header, sizeof(struct iphdr));
+            ret = bpf_sha256_keyed_hash(auth_data->key, 64,
+                                       hdr_stack, 
+                                       sizeof(struct iphdr),
+                                       verify_ctx->computed_hash);
+
+        }
+        else if (config_ctx->use_kfunc == 3) {
             // Use custom CHACHA20-POLY1305 implementation
             #ifdef BPF_DEBUG 
             bpf_printk("Using custom CHACHA20-POLY1305 for hash\n");
@@ -737,7 +765,7 @@ int xdp_ip_hash_func(struct xdp_md *ctx)
             __builtin_memcpy(hdr_copy, (const __u8 *)&verify_ctx->original_header,
                                        sizeof(struct iphdr)); 
 
-            ret = bpf_chacha20poly1305_auth(auth_data->key, 32, hdr_copy, sizeof(struct iphdr),
+            ret = bpf_chacha20poly1305_hash(auth_data->key, 32, hdr_copy, sizeof(struct iphdr),
                                             verify_ctx->computed_hash);
 
         }

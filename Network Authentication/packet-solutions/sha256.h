@@ -37,6 +37,7 @@
 #include "../common/xdp_stats_kern_user.h"
 #include "../common/xdp_stats_kern.h"
 #include "sha256_kfunc.h"
+#include "sha256_crypto.h"
 #include "helpers.h"
 
 #if 0

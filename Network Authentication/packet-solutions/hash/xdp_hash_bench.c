@@ -13,7 +13,9 @@
  *   -DALGO_SHA512         bpf_sha512_keyed_hash(), time hash call only
  *   -DALGO_HMAC_SHA256    bpf_hmac_sha256(), time hash call only
  *   -DALGO_HMAC_SHA512    bpf_hmac_sha512(), time hash call only
- *   -DALGO_BLAKE3         bpf_blake3_hash(), time hash call only
+ *   -DALGO_BLAKE3         bpf_blake3_keyed_hash(), time hash call only
+ *   -DALGO_CHACHA20       bpf_chacha20poly1305_hash(), time hash call only
+ *   -DALGO_KFUNC_SHA256   bpf_sha256_hash(), time hash only
  *   -DALGO_PURE_EBPF      compute_keyed_hash_from_map_dynamic(), time hash only
  *   -DALGO_PACKET_RESIZE  AH header insertion, time resize operation only
  *
@@ -53,6 +55,8 @@
     !defined(ALGO_HMAC_SHA256)   && \
     !defined(ALGO_HMAC_SHA512)   && \
     !defined(ALGO_BLAKE3)        && \
+    !defined(ALGO_CHACHA20)      && \
+    !defined(ALGO_KFUNC_SHA256)  && \
     !defined(ALGO_PURE_EBPF)     && \
     !defined(ALGO_PACKET_RESIZE)
 # error "Define exactly one ALGO_ flag"
@@ -78,8 +82,17 @@ extern int bpf_hmac_sha512(const __u8 *key,  __u32 key_len,
                             const __u8 *data, __u32 data_len,
                             __u8 *out) __ksym;
 #elif defined(ALGO_BLAKE3)
-extern int bpf_blake3_hash(const __u8 *data, __u32 data_len,
+extern int bpf_blake3_keyed_hash(const __u8 *key,  __u32 key_len,
+                                const __u8 *data, __u32 data_len,
                             __u8 *out) __ksym;
+#elif defined(ALGO_CHACHA20)
+extern int bpf_chacha20poly1305_hash(const __u8 *key,  __u32 key__sz,
+                                     const __u8 *data, __u32 data__sz,
+                                     __u8 *out) __ksym;
+#elif defined(ALGO_KFUNC_SHA256)
+extern int bpf_sha256_hash(const __u8 *key, __u32 key_len,
+                                const __u8 *data, __u32 data_len,
+                                __u8 *hash) __ksym;
 #endif
 
 /* ------------------------------------------------------------------
@@ -298,10 +311,17 @@ int xdp_hash_bench(struct xdp_md *ctx)
     bpf_hmac_sha512(key, KEY_LEN, ip_data, IP_HDR_LEN, hash_out);
 
 #elif defined(ALGO_BLAKE3)
-    __u8 blake3_input[KEY_LEN + IP_HDR_LEN];
-    __builtin_memcpy(blake3_input,           key,     KEY_LEN);
-    __builtin_memcpy(blake3_input + KEY_LEN, ip_data, IP_HDR_LEN);
-    bpf_blake3_hash(blake3_input, KEY_LEN + IP_HDR_LEN, hash_out);
+    //__u8 blake3_input[KEY_LEN + IP_HDR_LEN];
+    //__builtin_memcpy(blake3_input,           key,     KEY_LEN);
+    //__builtin_memcpy(blake3_input + KEY_LEN, ip_data, IP_HDR_LEN);
+    //bpf_blake3_hash(key, blake3_input, KEY_LEN + IP_HDR_LEN, hash_out);
+    bpf_blake3_keyed_hash(key, KEY_LEN, ip_data, IP_HDR_LEN, hash_out);
+
+#elif defined(ALGO_CHACHA20)
+    bpf_chacha20poly1305_hash(key, KEY_LEN, ip_data, IP_HDR_LEN, hash_out);
+
+#elif defined(ALGO_KFUNC_SHA256)
+    bpf_sha256_hash(key, KEY_LEN, ip_data, IP_HDR_LEN, hash_out);
 
 #elif defined(ALGO_PURE_EBPF)
     compute_keyed_hash_from_map_dynamic(ip_data, IP_HDR_LEN,

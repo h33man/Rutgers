@@ -48,7 +48,7 @@ BPF_CFLAGS := -O2 -g \
 # --------------------------------------------------------------------------
 .PHONY: all modules xdp clean load_sha256 load_sha512 load_hmac_sha256 \
         load_hmac_sha512 load_blake3 load_pure_ebpf unload instrcount \
-        sha256 sha512 hmac blake3
+        sha256 sha512 hmac blake3 chacha20 kfunc_sha256
 
 all: xdp #modules xdp
 
@@ -56,6 +56,7 @@ modules: sha256 sha512 hmac blake3
 
 xdp: xdp_blank.o xdp_parse_only.o xdp_sha256.o xdp_sha512.o \
      xdp_hmac_sha256.o xdp_hmac_sha512.o xdp_blake3.o \
+     xdp_chacha20.o xdp_kfunc_sha256.o \
      xdp_pure_ebpf.o xdp_packet_resize.o
 
 # --------------------------------------------------------------------------
@@ -117,6 +118,12 @@ xdp_hmac_sha512.o: xdp_hash_bench.c
 xdp_blake3.o: xdp_hash_bench.c
 	$(CLANG) $(BPF_CFLAGS) -DALGO_BLAKE3 -o $@ -c $<
 
+xdp_chacha20.o: xdp_hash_bench.c
+	$(CLANG) $(BPF_CFLAGS) -DALGO_CHACHA20 -o $@ -c $<
+
+xdp_kfunc_sha256.o: xdp_hash_bench.c
+	$(CLANG) $(BPF_CFLAGS) -DALGO_KFUNC_SHA256 -o $@ -c $<
+
 xdp_pure_ebpf.o: xdp_hash_bench.c
 	$(CLANG) $(BPF_CFLAGS) -DALGO_PURE_EBPF -o $@ -c $<
 
@@ -145,6 +152,14 @@ load_hmac_sha512: xdp_hmac_sha512.o
 	bpftool net attach xdp pinned /sys/fs/bpf/xdp_hash_bench dev $(IFACE)
 
 load_blake3: xdp_blake3.o
+	bpftool prog load $< /sys/fs/bpf/xdp_hash_bench
+	bpftool net attach xdp pinned /sys/fs/bpf/xdp_hash_bench dev $(IFACE)
+
+load_chacha20: xdp_chacha20.o
+	bpftool prog load $< /sys/fs/bpf/xdp_hash_bench
+	bpftool net attach xdp pinned /sys/fs/bpf/xdp_hash_bench dev $(IFACE)
+
+load_kfunc_sha256: xdp_kfunc_sha256.o
 	bpftool prog load $< /sys/fs/bpf/xdp_hash_bench
 	bpftool net attach xdp pinned /sys/fs/bpf/xdp_hash_bench dev $(IFACE)
 
